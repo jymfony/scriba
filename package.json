@@ -1,0 +1,6 @@
+{
+  "name": "@jymfony/compiler",
+  "devDependencies": {
+    "expect": "^27.4.2"
+  }
+}
