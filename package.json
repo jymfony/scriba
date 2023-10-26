@@ -8,7 +8,8 @@
     "build-release": "wasm-pack build --out-name compiler --target nodejs --release && RUSTFLAGS=\"-C target-feature=+simd128\" wasm-pack build --out-dir simd --out-name compiler --target nodejs --release --features=simd --target-dir=simd-target",
     "build": "wasm-pack build --out-name compiler --target nodejs --dev && RUSTFLAGS=\"-C target-feature=+simd128\" wasm-pack build --out-dir simd --out-name compiler --target nodejs --dev --features=simd --target-dir=simd-target",
     "pretest": "npm run build",
-    "test": "mocha tests/wasm/"
+    "test": "mocha tests/wasm/",
+    "prepublishOnly": "npm run build-release && bash -c 'rm {pkg,simd}/{.gitignore,package.json}'"
   },
   "main": "index.js",
   "types": "index.d.ts",
@@ -18,7 +19,16 @@
     "mocha": "^10.2.0",
     "prettier": "^3.0.3"
   },
-  "dependencies": {
-    "wasm-feature-detect": "^1.5.1"
-  }
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "pkg/compiler.js",
+    "pkg/compiler.d.ts",
+    "pkg/compiler_bg.wasm",
+    "pkg/compiler_bg.wasm.d.ts",
+    "simd/compiler.js",
+    "simd/compiler.d.ts",
+    "simd/compiler_bg.wasm",
+    "simd/compiler_bg.wasm.d.ts"
+  ]
 }

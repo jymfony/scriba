@@ -1,3 +1,5 @@
+/pkg
+/simd
 /target
 /simd-target
 /Cargo.lock

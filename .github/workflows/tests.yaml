@@ -7,21 +7,30 @@ on:
   pull_request_target:
 
 jobs:
-  test_package:
-    name: Test
+  test_rust:
+    name: Test Rust
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node_version: [12, 18, 20]
-      fail-fast: false
-
     steps:
       - uses: actions/checkout@v4
         name: Checkout source
 
+      - uses: actions/cache@v3
+        name: Setup Cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            simd-target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
       - name: Run Rust tests
         run: |
           cargo install grcov
+          npm install -g mocha
+          npm ci
           cargo clean
           cargo test
           grcov . --binary-path ./target/debug -s . -t lcov --branch -o ./coverage.lcov
@@ -34,6 +43,40 @@ jobs:
         with:
           file: ./coverage.lcov
 
+  test_node:
+    name: Test (Node.JS ${{ matrix.node_version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node_version: [16, 18, 20]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout source
+
+      - uses: actions/cache@v3
+        name: Setup Cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            simd-target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Get npm cache directory
+        id: npm-cache-dir
+        shell: bash
+        run: echo "dir=$(npm config get cache)" >> ${GITHUB_OUTPUT}
+
+      - uses: actions/cache@v3
+        with:
+          path: ${{ steps.npm-cache-dir.outputs.dir }}
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+
       - uses: actions/setup-node@v3
         name: Setup Node.JS
         with:
@@ -41,6 +84,8 @@ jobs:
 
       - name: Run WASM tests
         run: |
-          cargo install wasm-pack  
+          cargo install wasm-pack --force
           cargo clean
+          npm install -g mocha
+          npm ci
           npm test
