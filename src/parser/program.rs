@@ -58,6 +58,7 @@ impl Program {
 
             let mut transformers: Box<dyn Fold> = Box::new(chain!(
                 resolver(unresolved_mark, top_level_mark, self.is_typescript),
+                anonymous_expr(),
                 class_reflection_decorators(
                     self.filename.as_deref(),
                     opts.namespace.as_deref(),
@@ -66,7 +67,6 @@ impl Program {
                 strip(top_level_mark),
                 nullish_coalescing(Default::default()),
                 optional_chaining(Default::default(), unresolved_mark),
-                anonymous_expr(),
                 resolve_self_identifiers(unresolved_mark),
                 class_jobject(),
                 decorator_2022_03(),

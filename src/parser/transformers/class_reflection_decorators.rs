@@ -126,7 +126,8 @@ impl<C: Comments> VisitMut for ClassReflectionDecorators<'_, C> {
     }
 
     fn visit_mut_class_expr(&mut self, n: &mut ClassExpr) {
-        self.process_class(&mut n.class, n.ident.clone().unwrap());
+        let Some(ident) = n.ident.clone() else { panic!("anonymous_expr transformer must be called before class_reflection_decorator"); };
+        self.process_class(&mut n.class, ident);
         n.visit_mut_children_with(self);
     }
 }
