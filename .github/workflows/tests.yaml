@@ -1,0 +1,46 @@
+name: Test Suite
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request_target:
+
+jobs:
+  test_package:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node_version: [12, 18, 20]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout source
+
+      - name: Run Rust tests
+        run: |
+          cargo install grcov
+          cargo clean
+          cargo test
+          grcov . --binary-path ./target/debug -s . -t lcov --branch -o ./coverage.lcov
+        env:
+          RUSTFLAGS: -Cinstrument-coverage
+          LLVM_PROFILE_FILE: "%p-%m.profraw"
+
+      - name: Publish coverage report
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.lcov
+
+      - uses: actions/setup-node@v3
+        name: Setup Node.JS
+        with:
+          node-version: ${{ matrix.node_version }}
+
+      - name: Run WASM tests
+        run: |
+          cargo install wasm-pack  
+          cargo clean
+          npm test

@@ -1,3 +1,4 @@
 /target
+/simd-target
 /Cargo.lock
 /node_modules

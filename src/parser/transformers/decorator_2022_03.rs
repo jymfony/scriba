@@ -7,8 +7,8 @@ use crate::parser::util::{ident, undefined};
 use rustc_hash::FxHashMap;
 use swc_atoms::JsWord;
 use swc_common::{util::take::Take, Spanned, SyntaxContext, DUMMY_SP};
-use swc_ecma_ast::*;
 use swc_ecma_ast::Expr::Bin;
+use swc_ecma_ast::*;
 use swc_ecma_utils::{
     alias_ident_for, constructor::inject_after_super, default_constructor, prepend_stmt,
     private_ident, prop_name_to_expr_value, quote_ident, replace_ident, ExprFactory, IdentExt,
@@ -40,6 +40,7 @@ struct Decorator202203 {
     state: ClassState,
 
     /// Prepended before the class
+    #[allow(clippy::vec_box)]
     pre_class_inits: Vec<Box<Expr>>,
 
     rename_map: FxHashMap<Id, Id>,
@@ -120,18 +121,14 @@ impl Decorator202203 {
             let name = if let Some(ident) = p.pat.as_ident() {
                 Some(ident.id.clone())
             } else if let Some(rest) = p.pat.as_rest().map(|r| &r.arg) {
-                if let Some(ident) = rest.as_ident() {
-                    Some(ident.id.clone())
-                } else {
-                    None
-                }
+                rest.as_ident().map(|ident| ident.id.clone())
             } else {
                 None
             };
 
             let assign_right = if let Pat::Assign(assign) = &p.pat {
                 let r = assign.right.clone();
-                let span = assign.span.clone();
+                let span = assign.span;
                 p.pat = assign.left.as_ref().clone();
                 Some((r, span))
             } else {
@@ -140,97 +137,81 @@ impl Decorator202203 {
 
             let param_ident = match &mut p.pat {
                 Pat::Ident(i) => i.id.clone(),
-                Pat::Rest(r) => {
-                    match r.arg.as_mut() {
-                        Pat::Ident(i) => i.id.clone(),
-                        Pat::Array(a) => {
-                            let ident = private_ident!(format!("_rest_param{}", i));
-                            pre_stmts.push(
-                                Stmt::Decl(Decl::Var(Box::new(VarDecl {
-                                    span: DUMMY_SP,
-                                    kind: VarDeclKind::Let,
-                                    declare: false,
-                                    decls: vec![
-                                        VarDeclarator {
-                                            span: DUMMY_SP,
-                                            name: Pat::Array(a.clone()),
-                                            init: Some(Box::new(Expr::Ident(ident.clone()))),
-                                            definite: false,
-                                        }
-                                    ],
-                                })))
-                            );
-
-                            r.arg = Box::new(Pat::Ident(ident.clone().into()));
-                            ident
-                        }
-                        Pat::Object(o) => {
-                            let ident = private_ident!(format!("_rest_param{}", i));
-                            pre_stmts.push(
-                                Stmt::Decl(Decl::Var(Box::new(VarDecl {
-                                    span: DUMMY_SP,
-                                    kind: VarDeclKind::Let,
-                                    declare: false,
-                                    decls: vec![
-                                        VarDeclarator {
-                                            span: DUMMY_SP,
-                                            name: Pat::Object(o.clone()),
-                                            init: Some(Box::new(Expr::Ident(ident.clone()))),
-                                            definite: false,
-                                        }
-                                    ],
-                                })))
-                            );
-
-                            r.arg = Box::new(Pat::Ident(ident.clone().into()));
-                            ident
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                Pat::Array(a) => {
-                    let ident = private_ident!(format!("_param{}", i));
-                    pre_stmts.push(
-                        Stmt::Decl(Decl::Var(Box::new(VarDecl {
+                Pat::Rest(r) => match r.arg.as_mut() {
+                    Pat::Ident(i) => i.id.clone(),
+                    Pat::Array(a) => {
+                        let ident = private_ident!(format!("_rest_param{}", i));
+                        pre_stmts.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
                             span: DUMMY_SP,
                             kind: VarDeclKind::Let,
                             declare: false,
-                            decls: vec![
-                                VarDeclarator {
-                                    span: DUMMY_SP,
-                                    name: Pat::Array(a.clone()),
-                                    init: Some(Box::new(Expr::Ident(ident.clone()))),
-                                    definite: false,
-                                }
-                            ],
-                        })))
-                    );
+                            decls: vec![VarDeclarator {
+                                span: DUMMY_SP,
+                                name: Pat::Array(a.clone()),
+                                init: Some(Box::new(Expr::Ident(ident.clone()))),
+                                definite: false,
+                            }],
+                        }))));
+
+                        r.arg = Box::new(Pat::Ident(ident.clone().into()));
+                        ident
+                    }
+                    Pat::Object(o) => {
+                        let ident = private_ident!(format!("_rest_param{}", i));
+                        pre_stmts.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
+                            span: DUMMY_SP,
+                            kind: VarDeclKind::Let,
+                            declare: false,
+                            decls: vec![VarDeclarator {
+                                span: DUMMY_SP,
+                                name: Pat::Object(o.clone()),
+                                init: Some(Box::new(Expr::Ident(ident.clone()))),
+                                definite: false,
+                            }],
+                        }))));
+
+                        r.arg = Box::new(Pat::Ident(ident.clone().into()));
+                        ident
+                    }
+                    _ => unreachable!("{}:{}", file!(), line!()),
+                },
+                Pat::Array(a) => {
+                    let ident = private_ident!(format!("_param{}", i));
+                    pre_stmts.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
+                        span: DUMMY_SP,
+                        kind: VarDeclKind::Let,
+                        declare: false,
+                        decls: vec![VarDeclarator {
+                            span: DUMMY_SP,
+                            name: Pat::Array(a.clone()),
+                            init: Some(Box::new(Expr::Ident(ident.clone()))),
+                            definite: false,
+                        }],
+                    }))));
 
                     p.pat = Pat::Ident(ident.clone().into());
                     ident
                 }
                 Pat::Object(o) => {
                     let ident = private_ident!(format!("_param{}", i));
-                    pre_stmts.push(
-                        Stmt::Decl(Decl::Var(Box::new(VarDecl {
+                    pre_stmts.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
+                        span: DUMMY_SP,
+                        kind: VarDeclKind::Let,
+                        declare: false,
+                        decls: vec![VarDeclarator {
                             span: DUMMY_SP,
-                            kind: VarDeclKind::Let,
-                            declare: false,
-                            decls: vec![
-                                VarDeclarator {
-                                    span: DUMMY_SP,
-                                    name: Pat::Object(o.clone()),
-                                    init: Some(Box::new(Expr::Ident(ident.clone()))),
-                                    definite: false,
-                                }
-                            ],
-                        })))
-                    );
+                            name: Pat::Object(o.clone()),
+                            init: Some(Box::new(Expr::Ident(ident.clone()))),
+                            definite: false,
+                        }],
+                    }))));
 
                     p.pat = Pat::Ident(ident.clone().into());
                     ident
                 }
-                Pat::Assign(..) | Pat::Invalid(..) | Pat::Expr(..) => unreachable!(),
+                Pat::Assign(..) | Pat::Invalid(..) | Pat::Expr(..) => {
+                    unreachable!("{}:{}", file!(), line!())
+                }
             };
 
             if let Some((right, span)) = assign_right {
@@ -261,7 +242,8 @@ impl Decorator202203 {
                                 span: DUMMY_SP,
                                 obj: Box::new(Expr::Ident(init)),
                                 prop: MemberProp::Ident(ident("call")),
-                            }).as_callee(),
+                            })
+                            .as_callee(),
                             args: vec![
                                 if is_constructor && self.state.super_class.is_some() {
                                     undefined().as_arg()
@@ -294,14 +276,14 @@ impl Decorator202203 {
                                     (match cm.kind {
                                         MethodKind::Setter => SETTER,
                                         MethodKind::Method => METHOD,
-                                        _ => unreachable!(),
+                                        _ => unreachable!("{}:{}", file!(), line!()),
                                     } + if cm.is_static { STATIC } else { 0 })
                                     .as_arg(),
                                 ),
                                 Some(match &cm.key {
                                     PropName::Ident(i) => i.sym.clone().as_arg(),
                                     PropName::Computed(c) => c.expr.clone().as_arg(),
-                                    _ => unreachable!(),
+                                    _ => unreachable!("{}:{}", file!(), line!()),
                                 }),
                                 Some(0_usize.as_arg()),
                             ]
@@ -312,7 +294,7 @@ impl Decorator202203 {
                                     (match cm.kind {
                                         MethodKind::Setter => SETTER,
                                         MethodKind::Method => METHOD,
-                                        _ => unreachable!(),
+                                        _ => unreachable!("{}:{}", file!(), line!()),
                                     } + if cm.is_static { STATIC } else { 0 })
                                     .as_arg(),
                                 ),
@@ -320,7 +302,7 @@ impl Decorator202203 {
                                 Some(1_usize.as_arg()),
                             ]
                         }
-                        _ => unreachable!(),
+                        _ => unreachable!("{}:{}", file!(), line!()),
                     },
                 }
                 .as_arg(),
@@ -332,7 +314,8 @@ impl Decorator202203 {
                     elems: vec![
                         dec,
                         Some(PARAM.as_arg()),
-                        name.map(|n| n.sym.as_arg()).or_else(|| Some(undefined().as_arg())),
+                        name.map(|n| n.sym.as_arg())
+                            .or_else(|| Some(undefined().as_arg())),
                         Some(i.as_arg()),
                         Some(if p.pat.is_rest() { 1_usize } else { 0_usize }.as_arg()),
                         func,
@@ -351,21 +334,21 @@ impl Decorator202203 {
                     b.stmts.splice(0..0, pre_stmts.drain(..));
                     b.stmts.splice(0..0, init_calls.drain(..));
                 }
-            },
+            }
             ClassMember::PrivateMethod(m) => {
                 m.function.params = n;
                 if let Some(b) = &mut m.function.body {
                     b.stmts.splice(0..0, pre_stmts.drain(..));
                     b.stmts.splice(0..0, init_calls.drain(..));
                 }
-            },
+            }
             ClassMember::Constructor(c) => {
                 if let Some(b) = &mut c.body {
                     b.stmts.splice(0..0, pre_stmts.drain(..));
                     b.stmts.splice(0..0, init_calls.drain(..));
                 }
             }
-            _ => unreachable!(),
+            _ => unreachable!("{}:{}", file!(), line!()),
         };
     }
 
@@ -510,7 +493,7 @@ impl Decorator202203 {
             }))),
             right: Box::new(Expr::Call(CallExpr {
                 span: DUMMY_SP,
-                callee: Expr::Ident(ident("_apply_decs_2203_r")).as_callee(),
+                callee: ident("_apply_decs_2203_r").as_callee(),
                 args: combined_args,
                 type_args: Default::default(),
             })),
@@ -551,7 +534,7 @@ impl Decorator202203 {
                     Ident::new(format!("_{prefix}_{}", i.sym).into(), i.span.private()),
                 ),
                 _ => {
-                    unreachable!()
+                    unreachable!("{}:{}", file!(), line!())
                 }
             },
             _ => {
@@ -603,7 +586,7 @@ impl Decorator202203 {
             }
         }
 
-        unreachable!()
+        unreachable!("{}:{}", file!(), line!())
     }
 
     fn ensure_identity_constructor<'a>(&mut self, c: &'a mut Class) -> &'a mut Constructor {
@@ -637,7 +620,7 @@ impl Decorator202203 {
             }
         }
 
-        unreachable!()
+        unreachable!("{}:{}", file!(), line!())
     }
 
     fn handle_super_class(&mut self, class: &mut Class) {
@@ -1200,6 +1183,7 @@ impl VisitMut for Decorator202203 {
                     });
 
                     p.kind = MethodKind::Getter;
+                    p.function.params = vec![];
                     p.function.body = Some(BlockStmt {
                         span: DUMMY_SP,
                         stmts: vec![call_stmt],
@@ -1798,7 +1782,10 @@ impl VisitMut for Decorator202203 {
                 span: _,
                 decl: DefaultDecl::Class(c),
             })) => {
-                self.handle_class_expr(&mut c.class, c.ident.as_ref());
+                if !c.class.decorators.is_empty() {
+                    self.handle_class_expr(&mut c.class, c.ident.as_ref());
+                }
+
                 s.visit_mut_children_with(self);
             }
             _ => {
@@ -1864,6 +1851,57 @@ impl VisitMut for Decorator202203 {
 
         *n = new;
 
+        if !self.rename_map.is_empty() {
+            n.visit_mut_with(&mut IdentRenamer::new(&self.rename_map));
+        }
+
+        self.extra_lets = old_extra_lets;
+    }
+
+    fn visit_mut_script(&mut self, n: &mut Script) {
+        let old_extra_lets = self.extra_lets.take();
+
+        let mut new = Vec::with_capacity(n.body.len());
+
+        for mut n in n.body.take() {
+            n.visit_mut_with(self);
+            if !self.extra_lets.is_empty() {
+                new.push(
+                    Stmt::Decl(Decl::Var(Box::new(VarDecl {
+                        span: DUMMY_SP,
+                        kind: VarDeclKind::Let,
+                        decls: self.extra_lets.take(),
+                        declare: false,
+                    })))
+                    .into(),
+                )
+            }
+            if !self.pre_class_inits.is_empty() {
+                new.push(
+                    Stmt::Expr(ExprStmt {
+                        span: DUMMY_SP,
+                        expr: Expr::from_exprs(self.pre_class_inits.take()),
+                    })
+                    .into(),
+                )
+            }
+            new.push(n.take());
+        }
+
+        if !self.extra_vars.is_empty() {
+            prepend_stmt(
+                &mut new,
+                VarDecl {
+                    span: DUMMY_SP,
+                    kind: VarDeclKind::Var,
+                    decls: self.extra_vars.take(),
+                    declare: false,
+                }
+                .into(),
+            );
+        }
+
+        n.body = new;
         if !self.rename_map.is_empty() {
             n.visit_mut_with(&mut IdentRenamer::new(&self.rename_map));
         }

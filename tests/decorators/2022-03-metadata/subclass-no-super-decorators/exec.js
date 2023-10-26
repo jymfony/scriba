@@ -1,7 +1,7 @@
 function dec(v) {
-  return (_, ctx) => {
-    ctx.metadata.foo = v;
-  };
+    return (_, ctx) => {
+        ctx.metadata.foo = v;
+    };
 }
 
 Symbol.metadata = Symbol();

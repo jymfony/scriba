@@ -1,28 +1,26 @@
 mod inject_helpers;
+pub mod uuid;
 
-use std::{env, fs};
+use ansi_term::Color;
+pub use inject_helpers::inject_helpers;
+use sha1::{Digest, Sha1};
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
-use ansi_term::Color;
-use sha1::{Digest, Sha1};
-use swc_common::{Mark};
+use std::{env, fs};
+use swc_common::Mark;
 use swc_ecma_parser::Syntax;
-use swc_ecma_transforms_base::{
-    fixer,
-    hygiene,
-};
+use swc_ecma_transforms_base::{fixer, hygiene};
 use swc_ecma_transforms_testing::{HygieneVisualizer, Tester};
 use swc_ecma_visit::{Fold, FoldWith};
 use tempfile::tempdir_in;
 use testing::find_executable;
-pub use inject_helpers::inject_helpers;
 
 fn make_tr<F, P>(op: F, tester: &mut Tester<'_>) -> impl Fold
-    where
-        F: FnOnce(&mut Tester<'_>) -> P,
-        P: Fold,
+where
+    F: FnOnce(&mut Tester<'_>) -> P,
+    P: Fold,
 {
     op(tester)
 }
@@ -37,9 +35,9 @@ fn calc_hash(s: &str) -> String {
 
 /// Execute `jest` after transpiling `input` using `tr`.
 pub fn exec_tr<F, P>(test_name: &str, syntax: Syntax, tr: F, input: &str)
-    where
-        F: FnOnce(&mut Tester<'_>) -> P,
-        P: Fold,
+where
+    F: FnOnce(&mut Tester<'_>) -> P,
+    P: Fold,
 {
     Tester::run(|tester| {
         let tr = make_tr(tr, tester);

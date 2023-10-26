@@ -63,6 +63,6 @@ impl SyntaxError {
             column
         );
 
-        Self::new(message.as_str()).into()
+        Self::new(message.as_str())
     }
 }

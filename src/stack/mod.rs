@@ -15,6 +15,7 @@ lazy_static! {
         RwLock::new(HashMap::new());
 }
 
+#[derive(Debug)]
 pub(crate) struct Frame {
     pub filename: Option<String>,
     pub line_no: u32,

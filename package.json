@@ -1,6 +1,24 @@
 {
   "name": "@jymfony/compiler",
+  "version": "0.5.0-alpha.1",
+  "type": "commonjs",
+  "author": "Alessandro Chitolina <alekitto@gmail.com>",
+  "license": "MIT",
+  "scripts": {
+    "build-release": "wasm-pack build --out-name compiler --target nodejs --release && RUSTFLAGS=\"-C target-feature=+simd128\" wasm-pack build --out-dir simd --out-name compiler --target nodejs --release --features=simd --target-dir=simd-target",
+    "build": "wasm-pack build --out-name compiler --target nodejs --dev && RUSTFLAGS=\"-C target-feature=+simd128\" wasm-pack build --out-dir simd --out-name compiler --target nodejs --dev --features=simd --target-dir=simd-target",
+    "pretest": "npm run build",
+    "test": "mocha tests/wasm/"
+  },
+  "main": "index.js",
+  "types": "index.d.ts",
   "devDependencies": {
-    "expect": "^27.4.2"
+    "@jymfony/util": "^0.1.0-alpha.31",
+    "expect": "^27.4.2",
+    "mocha": "^10.2.0",
+    "prettier": "^3.0.3"
+  },
+  "dependencies": {
+    "wasm-feature-detect": "^1.5.1"
   }
 }

@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 use swc_common::util::take::Take;
 use swc_common::DUMMY_SP;
 use swc_ecma_ast::*;
-use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut};
+use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
 
 lazy_static! {
     static ref JOBJECT_ACCESSOR: MemberExpr = {
@@ -39,6 +39,7 @@ impl VisitMut for ClassJObject {
     noop_visit_mut_type!();
 
     fn visit_mut_class(&mut self, n: &mut Class) {
+        n.visit_mut_children_with(self);
         if n.super_class.is_some() {
             return;
         }
@@ -132,9 +133,7 @@ impl VisitMut for ClassJObject {
             block_stmts.push(if_block);
 
             for p in initializers.drain(..) {
-                let ClassMember::ClassProp(mut p) = p else {
-                    unreachable!()
-                };
+                let mut p = p.expect_class_prop();
                 assert!(!p.is_static);
 
                 let value = p.value.take();

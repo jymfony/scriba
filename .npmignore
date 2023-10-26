@@ -1,0 +1,14 @@
+/node_modules/
+/pkg/.gitignore
+/pkg/package.json
+/simd/.gitignore
+/simd/package.json
+/src/
+/simd-target/
+/target/
+/tests/
+/.gitignore
+/.mocha*
+/.yarnrc.yml
+/Cargo.*
+/yarn.lock

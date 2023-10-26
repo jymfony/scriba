@@ -1,13 +1,11 @@
 use std::path::Path;
-use swc_common::{DUMMY_SP, Mark};
+use swc_common::{Mark, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_utils::{ExprFactory, prepend_stmts, quote_ident};
-use swc_ecma_visit::{as_folder, Fold, noop_visit_mut_type, VisitMut, VisitMutWith};
+use swc_ecma_utils::{prepend_stmts, quote_ident, ExprFactory};
+use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
 
 pub fn inject_helpers(global_mark: Mark) -> impl Fold + VisitMut {
-    as_folder(InjectHelpers {
-        global_mark,
-    })
+    as_folder(InjectHelpers { global_mark })
 }
 
 struct InjectHelpers {
@@ -26,10 +24,7 @@ impl InjectHelpers {
     fn build_import(&self, name: &str, mark: Mark) -> ModuleItem {
         let s = ImportSpecifier::Named(ImportNamedSpecifier {
             span: DUMMY_SP,
-            local: Ident::new(
-                format!("_{}", name).into(),
-                DUMMY_SP.apply_mark(mark),
-            ),
+            local: Ident::new(format!("_{}", name).into(), DUMMY_SP.apply_mark(mark)),
             imported: Some(quote_ident!("_").into()),
             is_type_only: false,
         });
@@ -53,13 +48,13 @@ impl InjectHelpers {
                 sym: "require".into(),
                 optional: false,
             })
-                .as_callee(),
+            .as_callee(),
             args: vec![Str {
                 span: DUMMY_SP,
                 value: Self::build_helper_path(name).into(),
                 raw: None,
             }
-                .as_arg()],
+            .as_arg()],
             type_args: None,
         };
         let decl = Decl::Var(
@@ -76,7 +71,7 @@ impl InjectHelpers {
                     definite: false,
                 }],
             }
-                .into(),
+            .into(),
         );
         Stmt::Decl(decl)
     }

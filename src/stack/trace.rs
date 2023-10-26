@@ -3,7 +3,7 @@ use super::{Frame, FILE_MAPPINGS};
 /// Prepares stack trace using V8 stack trace API.
 pub(crate) fn remap_stack_trace(
     error_message: &str,
-    stack: Box<[Frame]>,
+    stack: &[Frame],
     previous: Option<String>,
 ) -> String {
     let mut processed = false;
@@ -20,23 +20,25 @@ pub(crate) fn remap_stack_trace(
                 return frame.string_repr.clone();
             };
 
-            let Some(token) = source_map.0.lookup_token(frame.line_no, frame.col_no) else {
+            let line_no = frame.line_no - 1;
+            let col_no = frame.col_no - 1;
+            let Some(token) = source_map.0.lookup_token(line_no, col_no) else {
                 return frame.string_repr.clone();
             };
 
             let file_location = format!(
                 "{}:{}:{}",
                 file_name,
-                token.get_src_line(),
-                token.get_src_col()
+                token.get_src_line() + 1,
+                token.get_src_col() + 1,
             );
             let mut function_name = frame.function_name.as_ref().cloned();
             if let Some(sv) = source_map.0.get_source_view(token.get_src_id()) {
                 function_name = source_map
                     .0
                     .get_original_function_name(
-                        frame.line_no,
-                        frame.col_no,
+                        line_no,
+                        col_no,
                         function_name.unwrap_or_default().as_str(),
                         sv,
                     )
@@ -113,6 +115,7 @@ pub(crate) fn remap_stack_trace(
         })
         .collect::<Vec<_>>();
 
+    #[allow(clippy::unnecessary_unwrap)]
     if previous.is_some() && !processed {
         previous.unwrap()
     } else {

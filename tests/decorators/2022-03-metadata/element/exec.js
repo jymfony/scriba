@@ -1,13 +1,13 @@
 function dec(_, ctx) {
-  console.error(ctx);
-  ctx.metadata.foo = 3;
+    console.error(ctx);
+    ctx.metadata.foo = 3;
 }
 
 Symbol.metadata = Symbol();
 
 class A {
-  @dec
-  foo;
+    @dec
+    foo;
 }
 
 expect(A[Symbol.metadata]).toEqual({ foo: 3 });

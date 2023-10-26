@@ -1,5 +1,5 @@
 function dec(_, ctx) {
-  ctx.metadata.foo = 3;
+    ctx.metadata.foo = 3;
 }
 
 Symbol.metadata = Symbol();
