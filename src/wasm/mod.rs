@@ -55,7 +55,7 @@ pub fn start() {
         },
     );
 
-    Error::set_stack_trace_limit(0);
+    Error::set_stack_trace_limit(255);
     Error::set_prepare_stack_trace(a.as_ref().unchecked_ref());
     a.forget();
 }

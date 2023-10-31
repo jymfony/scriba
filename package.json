@@ -1,6 +1,6 @@
 {
   "name": "@jymfony/compiler",
-  "version": "0.5.0-alpha.1",
+  "version": "0.5.0-alpha.2",
   "type": "commonjs",
   "author": "Alessandro Chitolina <alekitto@gmail.com>",
   "license": "MIT",
@@ -22,6 +22,8 @@
   "files": [
     "index.js",
     "index.d.ts",
+    "lib/_apply_decs_2203_r.js",
+    "lib/reflection.js",
     "pkg/compiler.js",
     "pkg/compiler.d.ts",
     "pkg/compiler_bg.wasm",

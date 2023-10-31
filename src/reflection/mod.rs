@@ -1,6 +1,6 @@
 #[cfg(not(test))]
 use lazy_static::lazy_static;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::{Arc, RwLock};
 use swc_common::Span;
 use swc_ecma_ast::{Class, Ident};
@@ -8,12 +8,12 @@ use uuid::Uuid;
 
 #[cfg(test)]
 thread_local! {
-    static CLASS_REGISTRY: RwLock<HashMap<Uuid, Arc<ReflectionData>>> = RwLock::new(Default::default());
+    static CLASS_REGISTRY: RwLock<FxHashMap<Uuid, Arc<ReflectionData>>> = RwLock::new(Default::default());
 }
 
 #[cfg(not(test))]
 lazy_static! {
-    static ref CLASS_REGISTRY: RwLock<HashMap<Uuid, Arc<ReflectionData>>> =
+    static ref CLASS_REGISTRY: RwLock<FxHashMap<Uuid, Arc<ReflectionData>>> =
         RwLock::new(Default::default());
 }
 
@@ -22,7 +22,7 @@ pub struct ReflectionData {
     pub name: Ident,
     pub filename: Option<String>,
     pub namespace: Option<String>,
-    pub docblock: HashMap<Span, Option<String>>,
+    pub docblock: FxHashMap<Span, Option<String>>,
 }
 
 impl ReflectionData {
@@ -31,7 +31,7 @@ impl ReflectionData {
         name: Ident,
         filename: Option<&str>,
         namespace: Option<&str>,
-        docblock: HashMap<Span, Option<String>>,
+        docblock: FxHashMap<Span, Option<String>>,
     ) -> Self {
         Self {
             class: class.clone(),
@@ -49,7 +49,7 @@ pub(crate) fn register_class(class_id: &Uuid, data: ReflectionData) {
         let mut registry = CLASS_REGISTRY.write().unwrap();
 
         debug_assert!(registry.get(class_id).is_none());
-        registry.insert(class_id.clone(), Arc::new(data));
+        registry.insert(*class_id, Arc::new(data));
     }
 
     #[cfg(test)]
@@ -58,12 +58,12 @@ pub(crate) fn register_class(class_id: &Uuid, data: ReflectionData) {
             let mut registry = lock.write().unwrap();
 
             debug_assert!(registry.get(class_id).is_none());
-            registry.insert(class_id.clone(), Arc::new(data));
+            registry.insert(*class_id, Arc::new(data));
         });
     }
 }
 
-pub(crate) fn get_reflection_data<'a>(class_id: &Uuid) -> Option<Arc<ReflectionData>> {
+pub(crate) fn get_reflection_data(class_id: &Uuid) -> Option<Arc<ReflectionData>> {
     #[cfg(not(test))]
     let data = {
         let registry = CLASS_REGISTRY.read().unwrap();

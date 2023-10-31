@@ -19,75 +19,87 @@ mod util;
 
 pub const ES_VERSION: EsVersion = EsVersion::EsNext;
 
-pub fn parse(code: String, filename: Option<&str>) -> Result<Program> {
-    let source_map: Lrc<swc_common::SourceMap> = Default::default();
-    let source_file = source_map.new_source_file(
-        filename
-            .map(|f| FileName::Real(PathBuf::from(f)))
-            .unwrap_or_else(|| FileName::Anon),
-        code,
-    );
+pub trait CodeParser {
+    fn parse_program(self, filename: Option<&str>) -> Result<Program>;
+}
 
-    let comments = SingleThreadedComments::default();
-    let is_typescript = filename.is_some_and(|f| f.ends_with(".ts"));
-    let syntax = if is_typescript {
-        Syntax::Typescript(TsConfig {
-            tsx: false,
-            decorators: true,
-            dts: false,
-            no_early_errors: false,
-            disallow_ambiguous_jsx_like: false,
-        })
-    } else {
-        Syntax::Es(EsConfig {
-            jsx: false,
-            fn_bind: false,
-            decorators: true,
-            decorators_before_export: false,
-            export_default_from: false,
-            import_attributes: false,
-            allow_super_outside_method: false,
-            allow_return_outside_function: true,
-            auto_accessors: true,
-            explicit_resource_management: true,
-        })
-    };
+impl CodeParser for String {
+    fn parse_program(self, filename: Option<&str>) -> Result<Program> {
+        self.as_str().parse_program(filename)
+    }
+}
 
-    let lexer = Lexer::new(
-        syntax,
-        ES_VERSION,
-        StringInput::from(&*source_file),
-        Some(&comments),
-    );
+impl CodeParser for &str {
+    fn parse_program(self, filename: Option<&str>) -> Result<Program> {
+        let source_map: Lrc<swc_common::SourceMap> = Default::default();
+        let source_file = source_map.new_source_file(
+            filename
+                .map(|f| FileName::Real(PathBuf::from(f)))
+                .unwrap_or_else(|| FileName::Anon),
+            self.to_string(),
+        );
 
-    let mut parser = Parser::new_from(lexer);
-    let parse_result = parser.parse_program();
-    let orig_srcmap = sourcemap::get_orig_src_map(&source_file).unwrap_or_default();
-
-    if let Ok(program) = parse_result {
-        let errors = parser.take_errors();
-        if !errors.is_empty() {
-            let e = errors.first().unwrap();
-            Err(SyntaxError::from_parser_error(e, &source_file).into())
-        } else {
-            Ok(Program {
-                source_map,
-                orig_srcmap,
-                filename: filename.map(|f| f.to_string()),
-                program,
-                comments: Rc::new(comments),
-                is_typescript,
+        let comments = SingleThreadedComments::default();
+        let is_typescript = filename.is_some_and(|f| f.ends_with(".ts"));
+        let syntax = if is_typescript {
+            Syntax::Typescript(TsConfig {
+                tsx: false,
+                decorators: true,
+                dts: false,
+                no_early_errors: false,
+                disallow_ambiguous_jsx_like: false,
             })
+        } else {
+            Syntax::Es(EsConfig {
+                jsx: false,
+                fn_bind: false,
+                decorators: true,
+                decorators_before_export: false,
+                export_default_from: false,
+                import_attributes: true,
+                allow_super_outside_method: false,
+                allow_return_outside_function: true,
+                auto_accessors: true,
+                explicit_resource_management: true,
+            })
+        };
+
+        let lexer = Lexer::new(
+            syntax,
+            ES_VERSION,
+            StringInput::from(&*source_file),
+            Some(&comments),
+        );
+
+        let mut parser = Parser::new_from(lexer);
+        let parse_result = parser.parse_program();
+        let orig_srcmap = sourcemap::get_orig_src_map(&source_file).unwrap_or_default();
+
+        if let Ok(program) = parse_result {
+            let errors = parser.take_errors();
+            if !errors.is_empty() {
+                let e = errors.first().unwrap();
+                Err(SyntaxError::from_parser_error(e, &source_file).into())
+            } else {
+                Ok(Program {
+                    source_map,
+                    orig_srcmap,
+                    filename: filename.map(|f| f.to_string()),
+                    program,
+                    comments: Rc::new(comments),
+                    is_typescript,
+                })
+            }
+        } else {
+            let e = parse_result.unwrap_err();
+            Err(SyntaxError::from_parser_error(&e, &source_file).into())
         }
-    } else {
-        let e = parse_result.unwrap_err();
-        Err(SyntaxError::from_parser_error(&e, &source_file).into())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::CodeParser;
     use crate::parser::transformers::decorator_2022_03;
     use crate::testing::exec_tr;
     use crate::testing::uuid::reset_test_uuid;
@@ -165,7 +177,7 @@ export class y {
 }
 "#;
 
-        let result = parse(code.into(), None).expect("failed to parse");
+        let result = code.parse_program(None).expect("failed to parse_program");
         let compiled = result
             .compile(Default::default())
             .expect("failed to compile");
@@ -191,7 +203,7 @@ _export(exports, {
     }
 });
 var _initClass, __anonymous_xΞ1, _dec, __jymfony_JObject, _dec1, _initProto, _dec2, _initClass1, __jymfony_JObject1, _dec3, _initProto1, _dec4, _initClass2, __jymfony_JObject2, _dec5, _initProto2;
-_dec = __jymfony_reflect("00000000-0000-0000-0000-000000000000"), _dec1 = __jymfony_reflect("00000000-0000-0000-0000-000000000000", 0);
+_dec = __jymfony_reflect("00000000-0000-0000-0000-000000000000", void 0), _dec1 = __jymfony_reflect("00000000-0000-0000-0000-000000000000", 0);
 const p = (class _anonymous_xΞ1 extends (__jymfony_JObject = __jymfony.JObject) {
     static #_ = { e: [_initProto], c: [__anonymous_xΞ1, _initClass] } = _apply_decs_2203_r(this, [
         [
@@ -212,7 +224,7 @@ const p = (class _anonymous_xΞ1 extends (__jymfony_JObject = __jymfony.JObject)
     static #_2 = _initClass();
 }, __anonymous_xΞ1);
 let _x;
-_dec2 = __jymfony_reflect("00000000-0000-0000-0000-000000000001"), _dec3 = __jymfony_reflect("00000000-0000-0000-0000-000000000001", 0);
+_dec2 = __jymfony_reflect("00000000-0000-0000-0000-000000000001", void 0), _dec3 = __jymfony_reflect("00000000-0000-0000-0000-000000000001", 0);
 class x extends (__jymfony_JObject1 = __jymfony.JObject) {
     static #_ = { e: [_initProto1], c: [_x, _initClass1] } = _apply_decs_2203_r(this, [
         [
@@ -233,7 +245,7 @@ class x extends (__jymfony_JObject1 = __jymfony.JObject) {
     static #_2 = _initClass1();
 }
 let _y;
-_dec4 = __jymfony_reflect("00000000-0000-0000-0000-000000000002"), _dec5 = __jymfony_reflect("00000000-0000-0000-0000-000000000002", 0);
+_dec4 = __jymfony_reflect("00000000-0000-0000-0000-000000000002", void 0), _dec5 = __jymfony_reflect("00000000-0000-0000-0000-000000000002", 0);
 class y extends (__jymfony_JObject2 = __jymfony.JObject) {
     static #_ = { e: [_initProto2], c: [_y, _initClass2] } = _apply_decs_2203_r(this, [
         [
@@ -250,7 +262,7 @@ class y extends (__jymfony_JObject2 = __jymfony.JObject) {
     }
     f() {
         var _initClass, __anonymous_xΞ2, _dec, __jymfony_JObject, _dec1, _initProto;
-        _dec = __jymfony_reflect("00000000-0000-0000-0000-000000000003"), _dec1 = __jymfony_reflect("00000000-0000-0000-0000-000000000003", 0);
+        _dec = __jymfony_reflect("00000000-0000-0000-0000-000000000003", void 0), _dec1 = __jymfony_reflect("00000000-0000-0000-0000-000000000003", 0);
         return new (class _anonymous_xΞ2 extends (__jymfony_JObject = __jymfony.JObject) {
             static #_ = { e: [_initProto], c: [__anonymous_xΞ2, _initClass] } = _apply_decs_2203_r(this, [
                 [
@@ -282,7 +294,7 @@ class y extends (__jymfony_JObject2 = __jymfony.JObject) {
         let code = r#"
 new class ext impl test {[]}
 "#;
-        let result = parse(code.into(), Some("a.js"));
+        let result = code.parse_program(Some("a.js"));
         assert!(result.is_err());
 
         let error = result.unwrap_err();
@@ -370,7 +382,7 @@ export default @logger.logged class x {
 }
 "#;
 
-        let parsed = parse(code.into(), Some("a.js")).unwrap();
+        let parsed = code.parse_program(Some("a.js")).unwrap();
 
         assert!(parsed.program.is_module());
         assert!(parsed.program.as_module().unwrap().body.iter().any(|s| s

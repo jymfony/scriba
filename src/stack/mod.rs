@@ -1,7 +1,7 @@
 mod trace;
 
 use lazy_static::lazy_static;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::RwLock;
 
 pub(crate) use trace::remap_stack_trace;
@@ -11,8 +11,8 @@ unsafe impl Send for InternalSourceMap {}
 unsafe impl Sync for InternalSourceMap {}
 
 lazy_static! {
-    static ref FILE_MAPPINGS: RwLock<HashMap<String, InternalSourceMap>> =
-        RwLock::new(HashMap::new());
+    static ref FILE_MAPPINGS: RwLock<FxHashMap<String, InternalSourceMap>> =
+        RwLock::new(Default::default());
 }
 
 #[derive(Debug)]

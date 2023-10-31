@@ -27,6 +27,10 @@ export default /** class docblock */ class x {
     static staticPublicField;
     publicField;
     accessor publicAccessor;
+    
+    /** constructor docblock */
+    constructor(@type(String) constructorParam1) {
+    }
 
     /**
      * computed method docblock
@@ -65,7 +69,12 @@ return x[Symbol.metadata].act[Symbol.parameters][0].type;
         expect(t).toStrictEqual(String);
 
         const data = getReflectionData(exports['default']);
+        const construct = data.members.find((o) => o.name === 'constructor');
         const member = data.members.find((o) => o.name === 'publicMethod');
+
+        expect(construct).not.toBeUndefined();
+        expect(construct.docblock).toEqual('/** constructor docblock */');
+        expect(construct.parameters).toHaveLength(1);
 
         expect(member).not.toBeUndefined();
         expect(member.docblock).toEqual(

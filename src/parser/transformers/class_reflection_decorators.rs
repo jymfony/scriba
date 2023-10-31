@@ -1,12 +1,12 @@
 use crate::generate_uuid;
 use crate::parser::util::ident;
 use crate::reflection::{register_class, ReflectionData};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use swc_common::comments::{CommentKind, Comments};
 use swc_common::{Span, Spanned, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_utils::ExprFactory;
+use swc_ecma_utils::{undefined, ExprFactory};
 use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
 
 pub fn class_reflection_decorators<'a, C: Comments + 'a>(
@@ -35,7 +35,7 @@ impl<'a, C: Comments> ClassReflectionDecorators<'a, C> {
             .flatten()
             .rev()
             .find_map(|cmt| {
-                if cmt.kind == CommentKind::Block && cmt.text.starts_with("*") {
+                if cmt.kind == CommentKind::Block && cmt.text.starts_with('*') {
                     Some(format!("/*{}*/", cmt.text))
                 } else {
                     None
@@ -45,7 +45,7 @@ impl<'a, C: Comments> ClassReflectionDecorators<'a, C> {
 
     fn process_class(&self, n: &mut Class, name: Ident) {
         let id = generate_uuid();
-        let mut docblock = HashMap::new();
+        let mut docblock = FxHashMap::default();
         if n.span != DUMMY_SP {
             docblock.insert(n.span, self.get_element_docblock(n.span));
         }
@@ -55,7 +55,15 @@ impl<'a, C: Comments> ClassReflectionDecorators<'a, C> {
             expr: Box::new(Expr::Call(CallExpr {
                 span: DUMMY_SP,
                 callee: ident("__jymfony_reflect").as_callee(),
-                args: vec![id.to_string().as_arg()],
+                args: vec![
+                    id.to_string().as_arg(),
+                    n.body
+                        .iter()
+                        .enumerate()
+                        .find(|(_, m)| matches!(m, ClassMember::Constructor(_)))
+                        .map(|(idx, _)| idx.as_arg())
+                        .unwrap_or_else(|| undefined(DUMMY_SP).as_arg()),
+                ],
                 type_args: None,
             })),
         });
@@ -126,7 +134,9 @@ impl<C: Comments> VisitMut for ClassReflectionDecorators<'_, C> {
     }
 
     fn visit_mut_class_expr(&mut self, n: &mut ClassExpr) {
-        let Some(ident) = n.ident.clone() else { panic!("anonymous_expr transformer must be called before class_reflection_decorator"); };
+        let Some(ident) = n.ident.clone() else {
+            panic!("anonymous_expr transformer must be called before class_reflection_decorator");
+        };
         self.process_class(&mut n.class, ident);
         n.visit_mut_children_with(self);
     }

@@ -1,6 +1,7 @@
 use crate::stack::remap_stack_trace;
 use crate::Frame;
 use js_sys::*;
+use std::fmt::{Debug, Formatter};
 use std::iter::Iterator;
 use wasm_bindgen::prelude::*;
 
@@ -114,6 +115,12 @@ extern "C" {
 
     #[wasm_bindgen(method, js_name = toString)]
     pub fn to_string(this: &CallSite) -> String;
+}
+
+impl Debug for CallSite {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_string())
+    }
 }
 
 impl From<&CallSite> for Frame {

@@ -3,16 +3,17 @@ use std::{
     mem::{take, transmute},
 };
 
-use crate::parser::util::{ident, undefined};
+use crate::parser::util::ident;
 use rustc_hash::FxHashMap;
 use swc_atoms::JsWord;
 use swc_common::{util::take::Take, Spanned, SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::Expr::Bin;
 use swc_ecma_ast::*;
+use swc_ecma_transforms_base::helper_expr;
 use swc_ecma_utils::{
     alias_ident_for, constructor::inject_after_super, default_constructor, prepend_stmt,
-    private_ident, prop_name_to_expr_value, quote_ident, replace_ident, ExprFactory, IdentExt,
-    IdentRenamer,
+    private_ident, prop_name_to_expr_value, quote_ident, replace_ident, undefined, ExprFactory,
+    IdentExt, IdentRenamer,
 };
 use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
 
@@ -228,7 +229,7 @@ impl Decorator202203 {
                     span: DUMMY_SP,
                     op: BinaryOp::NotEqEq,
                     left: Box::new(Expr::Ident(init.clone())),
-                    right: Box::new(undefined()),
+                    right: undefined(DUMMY_SP),
                 })),
                 cons: Box::new(Stmt::Expr(ExprStmt {
                     span: DUMMY_SP,
@@ -246,7 +247,7 @@ impl Decorator202203 {
                             .as_callee(),
                             args: vec![
                                 if is_constructor && self.state.super_class.is_some() {
-                                    undefined().as_arg()
+                                    undefined(DUMMY_SP).as_arg()
                                 } else {
                                     ThisExpr::dummy().as_arg()
                                 },
@@ -266,7 +267,7 @@ impl Decorator202203 {
                         ClassMember::Constructor(..) => {
                             vec![
                                 Some(CLASS.as_arg()),
-                                Some(undefined().as_arg()),
+                                Some(undefined(DUMMY_SP).as_arg()),
                                 Some(0_usize.as_arg()),
                             ]
                         }
@@ -315,7 +316,7 @@ impl Decorator202203 {
                         dec,
                         Some(PARAM.as_arg()),
                         name.map(|n| n.sym.as_arg())
-                            .or_else(|| Some(undefined().as_arg())),
+                            .or_else(|| Some(undefined(DUMMY_SP).as_arg())),
                         Some(i.as_arg()),
                         Some(if p.pat.is_rest() { 1_usize } else { 0_usize }.as_arg()),
                         func,
@@ -927,21 +928,11 @@ impl Decorator202203 {
                     );
                 }
 
-                let identity = Box::new(Expr::Arrow(ArrowExpr {
-                    span: DUMMY_SP,
-                    params: vec![Pat::Ident(ident("x").into())],
-                    body: Box::new(BlockStmtOrExpr::Expr(Box::new(Expr::Ident(ident("x"))))),
-                    is_async: false,
-                    is_generator: false,
-                    type_params: None,
-                    return_type: None,
-                }));
-
                 let class = Box::new(Class {
                     span: DUMMY_SP,
                     decorators: Vec::new(),
                     body: c.class.body.take(),
-                    super_class: Some(identity),
+                    super_class: Some(Box::new(helper_expr!(identity))),
                     is_abstract: Default::default(),
                     type_params: Default::default(),
                     super_type_params: Default::default(),
@@ -1778,16 +1769,6 @@ impl VisitMut for Decorator202203 {
 
                 s.visit_mut_children_with(self);
             }
-            ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(ExportDefaultDecl {
-                span: _,
-                decl: DefaultDecl::Class(c),
-            })) => {
-                if !c.class.decorators.is_empty() {
-                    self.handle_class_expr(&mut c.class, c.ident.as_ref());
-                }
-
-                s.visit_mut_children_with(self);
-            }
             _ => {
                 s.visit_mut_children_with(self);
             }
@@ -1800,7 +1781,64 @@ impl VisitMut for Decorator202203 {
         let mut new = Vec::with_capacity(n.len());
 
         for mut n in n.take() {
+            if let ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(ExportDefaultDecl {
+                span,
+                decl: DefaultDecl::Class(c),
+            })) = &mut n
+            {
+                if !c.class.decorators.is_empty() {
+                    let new_class_name = self.handle_class_expr(&mut c.class, c.ident.as_ref());
+                    c.visit_mut_children_with(self);
+
+                    if !self.extra_lets.is_empty() {
+                        new.push(
+                            Stmt::Decl(Decl::Var(Box::new(VarDecl {
+                                span: DUMMY_SP,
+                                kind: VarDeclKind::Let,
+                                decls: self.extra_lets.take(),
+                                declare: false,
+                            })))
+                            .into(),
+                        )
+                    }
+                    if !self.pre_class_inits.is_empty() {
+                        new.push(
+                            Stmt::Expr(ExprStmt {
+                                span: DUMMY_SP,
+                                expr: Expr::from_exprs(self.pre_class_inits.take()),
+                            })
+                            .into(),
+                        )
+                    }
+
+                    let c = c.take();
+                    let stmt = if let Some(i) = c.ident {
+                        Stmt::Decl(Decl::Class(ClassDecl {
+                            ident: i,
+                            class: c.class,
+                            declare: false,
+                        }))
+                    } else {
+                        Stmt::Expr(ExprStmt {
+                            span: *span,
+                            expr: Box::new(Expr::Class(c)),
+                        })
+                    };
+
+                    new.push(ModuleItem::Stmt(stmt));
+                    new.push(ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(
+                        ExportDefaultExpr {
+                            span: *span,
+                            expr: Box::new(Expr::Ident(new_class_name)),
+                        },
+                    )));
+
+                    continue;
+                }
+            }
+
             n.visit_mut_with(self);
+
             if !self.extra_lets.is_empty() {
                 new.push(
                     Stmt::Decl(Decl::Var(Box::new(VarDecl {
@@ -1821,6 +1859,7 @@ impl VisitMut for Decorator202203 {
                     .into(),
                 )
             }
+
             new.push(n.take());
         }
 
@@ -1866,24 +1905,18 @@ impl VisitMut for Decorator202203 {
         for mut n in n.body.take() {
             n.visit_mut_with(self);
             if !self.extra_lets.is_empty() {
-                new.push(
-                    Stmt::Decl(Decl::Var(Box::new(VarDecl {
-                        span: DUMMY_SP,
-                        kind: VarDeclKind::Let,
-                        decls: self.extra_lets.take(),
-                        declare: false,
-                    })))
-                    .into(),
-                )
+                new.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
+                    span: DUMMY_SP,
+                    kind: VarDeclKind::Let,
+                    decls: self.extra_lets.take(),
+                    declare: false,
+                }))))
             }
             if !self.pre_class_inits.is_empty() {
-                new.push(
-                    Stmt::Expr(ExprStmt {
-                        span: DUMMY_SP,
-                        expr: Expr::from_exprs(self.pre_class_inits.take()),
-                    })
-                    .into(),
-                )
+                new.push(Stmt::Expr(ExprStmt {
+                    span: DUMMY_SP,
+                    expr: Expr::from_exprs(self.pre_class_inits.take()),
+                }))
             }
             new.push(n.take());
         }

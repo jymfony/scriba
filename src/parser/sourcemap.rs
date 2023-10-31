@@ -8,13 +8,20 @@ use url::Url;
 fn read_inline_sourcemap(data_url: Option<&str>) -> Result<Option<sourcemap::SourceMap>, Error> {
     match data_url {
         Some(data_url) => {
-            let url = Url::parse(data_url)
-                .with_context(|| format!("failed to parse inline source map url\n{}", data_url))?;
+            let url = Url::parse(data_url).with_context(|| {
+                format!(
+                    "failed to parse_program inline source map url\n{}",
+                    data_url
+                )
+            })?;
 
             let idx = match url.path().find("base64,") {
                 Some(v) => v,
                 None => {
-                    bail!("failed to parse inline source map: not base64: {:?}", url)
+                    bail!(
+                        "failed to parse_program inline source map: not base64: {:?}",
+                        url
+                    )
                 }
             };
 
@@ -29,7 +36,7 @@ fn read_inline_sourcemap(data_url: Option<&str>) -> Result<Option<sourcemap::Sou
             )?))
         }
         None => {
-            bail!("failed to parse inline source map: `sourceMappingURL` not found")
+            bail!("failed to parse_program inline source map: `sourceMappingURL` not found")
         }
     }
 }
