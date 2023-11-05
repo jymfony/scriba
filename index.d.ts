@@ -1,4 +1,4 @@
-export { compile, start, prepareStackTrace } from './pkg/compiler';
+export { compile, isValidIdentifier, start, prepareStackTrace } from './pkg/compiler';
 
 declare interface JsMethodParameter {
     name?: String;

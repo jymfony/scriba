@@ -49,7 +49,7 @@ where
                 decorators: true,
                 decorators_before_export: false,
                 export_default_from: false,
-                import_attributes: false,
+                import_attributes: true,
                 allow_super_outside_method: false,
                 allow_return_outside_function: true,
                 auto_accessors: true,

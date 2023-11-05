@@ -87,11 +87,10 @@ impl VisitMut for OptionalImport {
                 .and_then(|p| p.as_key_value())
                 .map(|kv| {
                     kv.key.as_ident().is_some_and(|i| i.sym == "optional")
-                        && kv.value.as_lit().is_some_and(|l| {
-                            let Lit::Bool(b) = l else {
-                                return false;
-                            };
-                            b.value
+                        && kv.value.as_lit().is_some_and(|l| match l {
+                            Lit::Bool(b) => b.value,
+                            Lit::Str(s) => s.value.to_string() == "true",
+                            _ => false,
                         })
                 })
                 .unwrap_or(false)
@@ -296,6 +295,52 @@ impl VisitMut for OptionalImport {
                     stmts
                 })
                 .map(ModuleItem::Stmt),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parser::transformers::optional_import;
+    use crate::testing::compile_tr;
+    use swc_common::{chain, Mark};
+    use swc_ecma_transforms_base::resolver;
+    use swc_ecma_visit::Fold;
+
+    fn create_pass() -> Box<dyn Fold> {
+        let unresolved_mark = Mark::new();
+        let top_level_mark = Mark::new();
+
+        Box::new(chain!(
+            resolver(unresolved_mark, top_level_mark, false),
+            optional_import(unresolved_mark),
+        ))
+    }
+
+    #[test]
+    pub fn should_compile_optional_imports_correctly() {
+        let code = r#"
+import Redis, { Cluster as RedisCluster } from 'ioredis' with { optional: 'true' };
+class RedisAdapter {
+}
+"#;
+
+        let compiled = compile_tr(|_| create_pass(), code);
+        assert_eq!(
+            compiled,
+            r#"const _r = function() {
+    try {
+        return require("ioredis");
+    } catch  {
+        return void 0;
+    }
+}();
+const Redis = void 0 !== _r ? _interop_require_default(_r, true).default : void 0;
+const RedisCluster = _r?.Cluster;
+;
+class RedisAdapter {
+}
+"#
         );
     }
 }
