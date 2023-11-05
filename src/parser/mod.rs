@@ -7,9 +7,10 @@ use std::rc::Rc;
 use swc_common::comments::SingleThreadedComments;
 use swc_common::input::StringInput;
 use swc_common::sync::Lrc;
-use swc_common::FileName;
+use swc_common::{BytePos, FileName};
 use swc_ecma_ast::EsVersion;
 use swc_ecma_parser::lexer::Lexer;
+use swc_ecma_parser::token::{IdentLike, Token, Word};
 use swc_ecma_parser::{EsConfig, Parser, Syntax, TsConfig};
 
 mod program;
@@ -97,9 +98,30 @@ impl CodeParser for &str {
     }
 }
 
+pub fn is_valid_identifier(input: &str) -> bool {
+    let lexer = Lexer::new(
+        Default::default(),
+        EsVersion::EsNext,
+        StringInput::new(input, BytePos(0), BytePos(input.len() as u32)),
+        None,
+    );
+
+    let mut tokens = lexer.into_iter().collect::<Vec<_>>();
+    if tokens.len() != 1 {
+        false
+    } else {
+        let token = tokens.drain(..).next().unwrap().token;
+        let Token::Word(Word::Ident(ident)) = token else {
+            return false;
+        };
+
+        matches!(ident, IdentLike::Other(..))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::CodeParser;
+    use super::{is_valid_identifier, CodeParser};
     use crate::parser::transformers::decorator_2022_03;
     use crate::testing::exec_tr;
     use crate::testing::uuid::reset_test_uuid;
@@ -392,5 +414,17 @@ export default @logger.logged class x {
         let _ = parsed
             .compile(Default::default())
             .expect("Should compile with no error");
+    }
+
+    #[test]
+    pub fn should_validate_identifiers() {
+        assert!(!is_valid_identifier(""));
+        assert!(!is_valid_identifier("x y z"));
+        assert!(!is_valid_identifier("export"));
+        assert!(!is_valid_identifier("abstract"));
+        assert!(!is_valid_identifier("public"));
+        assert!(is_valid_identifier("x"));
+        assert!(is_valid_identifier("y"));
+        assert!(is_valid_identifier("ident"));
     }
 }

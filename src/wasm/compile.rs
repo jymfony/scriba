@@ -64,3 +64,12 @@ pub fn compile(
         as_module,
     })?)
 }
+
+#[wasm_bindgen(js_name = isValidIdentifier)]
+pub fn is_valid_identifier(input: JsValue) -> bool {
+    if let Some(s) = input.as_string() {
+        crate::parser::is_valid_identifier(&s)
+    } else {
+        false
+    }
+}
