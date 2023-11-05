@@ -28,7 +28,7 @@ jobs:
 
             - name: Run Rust tests
               run: |
-                  cargo install grcov
+                  cargo install --force grcov
                   npm install -g mocha
                   npm ci
                   cargo clean
@@ -65,7 +65,7 @@ jobs:
                       ~/.cargo/git/db/
                       target/
                       simd-target/
-                  key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+                  key: ${{ runner.os }}-wasm-cargo-${{ hashFiles('**/Cargo.lock') }}
 
             - name: Get npm cache directory
               id: npm-cache-dir
