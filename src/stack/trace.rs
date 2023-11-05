@@ -10,20 +10,28 @@ pub(crate) fn remap_stack_trace(
     let mappings = FILE_MAPPINGS.read().unwrap();
     let new_stack = stack
         .iter()
-        .map(|frame| {
+        .filter_map(|frame| {
+            if frame
+                .function_name
+                .as_deref()
+                .is_some_and(|f| f == "_construct_jobject")
+            {
+                return None;
+            }
+
             let file_name = frame.filename.as_deref().unwrap_or_default();
             if frame.is_native {
-                return frame.string_repr.clone();
+                return Some(frame.string_repr.clone());
             }
 
             let Some(source_map) = mappings.get(file_name) else {
-                return frame.string_repr.clone();
+                return Some(frame.string_repr.clone());
             };
 
             let line_no = frame.line_no - 1;
             let col_no = frame.col_no - 1;
             let Some(token) = source_map.0.lookup_token(line_no, col_no) else {
-                return frame.string_repr.clone();
+                return Some(frame.string_repr.clone());
             };
 
             let file_location = format!(
@@ -102,7 +110,7 @@ pub(crate) fn remap_stack_trace(
             };
 
             processed = true;
-            format!(
+            Some(format!(
                 "{}{}{}",
                 if frame.is_async { "async " } else { "" },
                 if frame.is_promise_all {
@@ -111,7 +119,7 @@ pub(crate) fn remap_stack_trace(
                     "".to_string()
                 },
                 generate_function_call()
-            )
+            ))
         })
         .collect::<Vec<_>>();
 

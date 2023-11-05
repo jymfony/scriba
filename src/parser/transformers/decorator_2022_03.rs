@@ -251,6 +251,11 @@ impl Decorator202203 {
                                 } else {
                                     ThisExpr::dummy().as_arg()
                                 },
+                                if is_constructor && self.state.super_class.is_some() {
+                                    undefined(DUMMY_SP).as_arg()
+                                } else {
+                                    ThisExpr::dummy().as_arg()
+                                },
                                 param_ident.as_arg(),
                             ],
                             type_args: None,

@@ -7,6 +7,7 @@ interface CompileOptions {
     debug?: boolean;
     namespace?: string;
     asFunction?: boolean;
+    asModule?: boolean;
 }
 "#;
 
@@ -23,6 +24,9 @@ extern "C" {
 
     #[wasm_bindgen(structural, method, getter, js_name = "asFunction")]
     fn as_function(this: &WasmCompileOptions) -> Option<bool>;
+
+    #[wasm_bindgen(structural, method, getter, js_name = "asModule")]
+    fn as_module(this: &WasmCompileOptions) -> Option<bool>;
 }
 
 #[wasm_bindgen(js_name = compile)]
@@ -36,6 +40,10 @@ pub fn compile(
     let as_function = opts
         .as_ref()
         .and_then(|c| c.as_function())
+        .unwrap_or_default();
+    let as_module = opts
+        .as_ref()
+        .and_then(|c| c.as_module())
         .unwrap_or_default();
 
     let program = match source.parse_program(filename.as_deref()) {
@@ -53,5 +61,6 @@ pub fn compile(
         debug,
         namespace,
         as_function,
+        as_module,
     })?)
 }

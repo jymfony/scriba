@@ -263,7 +263,7 @@ class y extends (__jymfony_JObject2 = __jymfony.JObject) {
     f() {
         var _initClass, __anonymous_xΞ2, _dec, __jymfony_JObject, _dec1, _initProto;
         _dec = __jymfony_reflect("00000000-0000-0000-0000-000000000003", void 0), _dec1 = __jymfony_reflect("00000000-0000-0000-0000-000000000003", 0);
-        return new (class _anonymous_xΞ2 extends (__jymfony_JObject = __jymfony.JObject) {
+        return _construct_jobject((class _anonymous_xΞ2 extends (__jymfony_JObject = __jymfony.JObject) {
             static #_ = { e: [_initProto], c: [__anonymous_xΞ2, _initClass] } = _apply_decs_2203_r(this, [
                 [
                     _dec1,
@@ -281,7 +281,7 @@ class y extends (__jymfony_JObject2 = __jymfony.JObject) {
                 return __anonymous_xΞ2;
             }
             static #_2 = _initClass();
-        }, __anonymous_xΞ2);
+        }, __anonymous_xΞ2));
     }
     static #_2 = _initClass2();
 }

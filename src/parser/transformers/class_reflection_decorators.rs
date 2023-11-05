@@ -43,11 +43,17 @@ impl<'a, C: Comments> ClassReflectionDecorators<'a, C> {
             })
     }
 
-    fn process_class(&self, n: &mut Class, name: Ident) {
+    fn process_class(&self, n: &mut Class, name: Ident, outer_docblock: Option<String>) {
         let id = generate_uuid();
         let mut docblock = FxHashMap::default();
+        if let Some(outer_db) = outer_docblock {
+            docblock.insert(n.span, Some(outer_db));
+        }
+
         if n.span != DUMMY_SP {
-            docblock.insert(n.span, self.get_element_docblock(n.span));
+            if let Some(db) = self.get_element_docblock(n.span) {
+                docblock.insert(n.span, Some(db));
+            }
         }
 
         n.decorators.push(Decorator {
@@ -128,8 +134,38 @@ impl<'a, C: Comments> ClassReflectionDecorators<'a, C> {
 impl<C: Comments> VisitMut for ClassReflectionDecorators<'_, C> {
     noop_visit_mut_type!();
 
+    fn visit_mut_module_item(&mut self, n: &mut ModuleItem) {
+        match n {
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(ExportDefaultDecl {
+                decl: DefaultDecl::Class(expr),
+                span,
+            })) => {
+                let Some(ident) = expr.ident.clone() else {
+                    panic!("anonymous_expr transformer must be called before class_reflection_decorator");
+                };
+
+                self.process_class(&mut expr.class, ident, self.get_element_docblock(*span));
+                expr.visit_mut_children_with(self);
+            }
+            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
+                decl: Decl::Class(decl),
+                span,
+            })) => {
+                self.process_class(
+                    &mut decl.class,
+                    decl.ident.clone(),
+                    self.get_element_docblock(*span),
+                );
+                decl.visit_mut_children_with(self);
+            }
+            _ => {
+                n.visit_mut_children_with(self);
+            }
+        }
+    }
+
     fn visit_mut_class_decl(&mut self, n: &mut ClassDecl) {
-        self.process_class(&mut n.class, n.ident.clone());
+        self.process_class(&mut n.class, n.ident.clone(), None);
         n.visit_mut_children_with(self);
     }
 
@@ -137,7 +173,52 @@ impl<C: Comments> VisitMut for ClassReflectionDecorators<'_, C> {
         let Some(ident) = n.ident.clone() else {
             panic!("anonymous_expr transformer must be called before class_reflection_decorator");
         };
-        self.process_class(&mut n.class, ident);
+
+        self.process_class(&mut n.class, ident, None);
         n.visit_mut_children_with(self);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parser::transformers::class_reflection_decorators;
+    use crate::testing::compile_tr;
+    use swc_common::{chain, Mark};
+    use swc_ecma_transforms_base::resolver;
+    use swc_ecma_transforms_testing::Tester;
+    use swc_ecma_visit::Fold;
+
+    fn create_pass(tester: &mut Tester) -> Box<dyn Fold> {
+        let unresolved_mark = Mark::new();
+        let top_level_mark = Mark::new();
+
+        Box::new(chain!(
+            resolver(unresolved_mark, top_level_mark, false),
+            class_reflection_decorators(None, None, tester.comments.clone()),
+        ))
+    }
+
+    #[test]
+    pub fn should_compile_as_function_correctly() {
+        let code = r#"
+export default class TestClass {
+    publicMethod(a, b = 12, c = {}) {
+        console.log('test');
+    }
+}
+"#;
+
+        let compiled = compile_tr(|tester| create_pass(tester), code);
+        assert_eq!(
+            compiled,
+            r#"export default @__jymfony_reflect("00000000-0000-0000-0000-000000000000", void 0)
+class TestClass {
+    @__jymfony_reflect("00000000-0000-0000-0000-000000000000", 0)
+    publicMethod(a, b = 12, c = {}) {
+        console.log('test');
+    }
+}
+"#
+        );
     }
 }

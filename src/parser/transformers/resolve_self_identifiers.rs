@@ -42,16 +42,5 @@ impl VisitMut for ResolveSelfIdentifiers {
             };
             let _ = replace(n, current_class.clone());
         }
-
-        // match expr {
-        //     Expr::Ident(i) if i.span.ctxt != self.unresolved => false,
-        //     _ => {
-        //         if is_call && self.c.pure_getter {
-        //             !is_simple_member(expr)
-        //         } else {
-        //             true
-        //         }
-        //     }
-        // }
     }
 }

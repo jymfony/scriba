@@ -1,8 +1,8 @@
 mod anonymous_expr;
-mod class_define_fields;
 mod class_jobject;
 mod class_reflection_decorators;
 mod decorator_2022_03;
+mod lazy_object_construction;
 mod optional_import;
 mod remove_assert_calls;
 mod resolve_self_identifiers;
@@ -10,10 +10,10 @@ mod static_blocks;
 mod wrap_in_function;
 
 pub(crate) use anonymous_expr::anonymous_expr;
-pub(crate) use class_define_fields::class_define_fields;
 pub(crate) use class_jobject::class_jobject;
 pub(crate) use class_reflection_decorators::class_reflection_decorators;
 pub(crate) use decorator_2022_03::decorator_2022_03;
+pub(crate) use lazy_object_construction::lazy_object_construction;
 pub(crate) use optional_import::optional_import;
 pub(crate) use remove_assert_calls::remove_assert_calls;
 pub(crate) use resolve_self_identifiers::resolve_self_identifiers;

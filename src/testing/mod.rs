@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::Command;
 use std::{env, fs};
 use swc_common::Mark;
-use swc_ecma_parser::Syntax;
+use swc_ecma_parser::{EsConfig, Syntax};
 use swc_ecma_transforms_base::{fixer, hygiene};
 use swc_ecma_transforms_testing::{HygieneVisualizer, Tester};
 use swc_ecma_visit::{Fold, FoldWith};
@@ -31,6 +31,38 @@ fn calc_hash(s: &str) -> String {
     let sum = hasher.finalize();
 
     hex::encode(sum)
+}
+
+pub fn compile_tr<F, P>(tr: F, input: &str) -> String
+where
+    F: FnOnce(&mut Tester<'_>) -> P,
+    P: Fold,
+{
+    Tester::run(|tester| {
+        let tr = tr(tester);
+        let module = tester.apply_transform(
+            tr,
+            "input.js",
+            Syntax::Es(EsConfig {
+                jsx: false,
+                fn_bind: false,
+                decorators: true,
+                decorators_before_export: false,
+                export_default_from: false,
+                import_attributes: false,
+                allow_super_outside_method: false,
+                allow_return_outside_function: true,
+                auto_accessors: true,
+                explicit_resource_management: true,
+            }),
+            input,
+        )?;
+
+        let module = module.fold_with(&mut fixer::fixer(Some(&tester.comments)));
+
+        let src = tester.print(&module, &tester.comments.clone());
+        Ok(src)
+    })
 }
 
 /// Execute `jest` after transpiling `input` using `tr`.

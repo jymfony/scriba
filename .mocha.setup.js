@@ -2,4 +2,6 @@
 // to use same assertion between node-swc & rest.
 require('@jymfony/util');
 global.expect = require('expect');
-global.__jymfony.JObject = class {};
+global.__jymfony.JObject = class {
+    __construct() {}
+};

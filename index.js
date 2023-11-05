@@ -16,4 +16,5 @@ exports.start = start;
 exports.getReflectionData = require('./lib/reflection').getReflectionData;
 
 global._apply_decs_2203_r = require('./lib/_apply_decs_2203_r')._;
+global._construct_jobject = require('./lib/_construct_jobject')._;
 global.__jymfony_reflect = require('./lib/reflection')._;

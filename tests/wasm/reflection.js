@@ -20,7 +20,8 @@ const type = t => {
     };
 };
 
-export default /** class docblock */ class x {
+/** class docblock */
+export default class x {
     static #staticPrivateField;
     #privateField;
     accessor #privateAccessor;
@@ -54,6 +55,8 @@ export default /** class docblock */ class x {
     act(@type(String) param1) {}
     [a()](@type(String) param1) {}
     [Symbol.for('xtest')](@type(String) param1) {}
+    
+    publicMethodWithDefaults(a = {}, b = 1, c = 'test', d = /test/g, e = 42n, f = true, g = null) {}
 }
 
 return x[Symbol.metadata].act[Symbol.parameters][0].type;
@@ -71,6 +74,9 @@ return x[Symbol.metadata].act[Symbol.parameters][0].type;
         const data = getReflectionData(exports['default']);
         const construct = data.members.find((o) => o.name === 'constructor');
         const member = data.members.find((o) => o.name === 'publicMethod');
+        const defaults = data.members.find(
+            (o) => o.name === 'publicMethodWithDefaults',
+        );
 
         expect(construct).not.toBeUndefined();
         expect(construct.docblock).toEqual('/** constructor docblock */');
@@ -81,5 +87,11 @@ return x[Symbol.metadata].act[Symbol.parameters][0].type;
             '/**\n     * public method docblock\n     */',
         );
         expect(member.parameters).toHaveLength(3);
+        expect(member.parameters[1].name).toEqual('c');
+        expect(member.parameters[2].name).toEqual('x');
+        expect(defaults.parameters).toHaveLength(7);
+        expect(defaults.parameters[1].default).toEqual(1);
+        expect(defaults.parameters[2].default).toEqual('test');
+        expect(defaults.parameters[6].default).toEqual(null);
     });
 });

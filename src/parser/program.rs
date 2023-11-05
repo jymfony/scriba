@@ -1,6 +1,6 @@
 use crate::parser::transformers::{
-    anonymous_expr, class_define_fields, class_jobject, class_reflection_decorators,
-    decorator_2022_03, optional_import, remove_assert_calls, resolve_self_identifiers,
+    anonymous_expr, class_jobject, class_reflection_decorators, decorator_2022_03,
+    lazy_object_construction, optional_import, remove_assert_calls, resolve_self_identifiers,
     static_blocks, wrap_in_function,
 };
 use crate::stack::register_source_map;
@@ -18,7 +18,7 @@ use swc_ecma_codegen::Emitter;
 use swc_ecma_transforms_base::feature::FeatureFlag;
 use swc_ecma_transforms_base::fixer::fixer;
 use swc_ecma_transforms_base::helpers::{inject_helpers, Helpers, HELPERS};
-use swc_ecma_transforms_base::hygiene::hygiene;
+use swc_ecma_transforms_base::hygiene::{hygiene_with_config, Config as HygieneConfig};
 use swc_ecma_transforms_base::resolver;
 use swc_ecma_transforms_compat::es2020::{nullish_coalescing, optional_chaining};
 use swc_ecma_transforms_module::common_js;
@@ -31,6 +31,7 @@ pub struct CompileOptions {
     pub debug: bool,
     pub namespace: Option<String>,
     pub as_function: bool,
+    pub as_module: bool,
 }
 
 pub struct Program {
@@ -60,15 +61,13 @@ impl Program {
             HELPERS.set(&helpers, || {
                 let unresolved_mark = Mark::new();
                 let top_level_mark = Mark::new();
-                let static_block_mark = Mark::new();
+                let static_blocks_mark = Mark::new();
                 let available_set = FeatureFlag::all();
 
                 let common_js_config = common_js::Config {
                     import_interop: Some(ImportInterop::Swc),
                     lazy: Lazy::Object(LazyObjectConfig {
-                        patterns: vec![
-                            CachedRegex::new(".+").unwrap(),
-                        ],
+                        patterns: vec![CachedRegex::new(".+").unwrap()],
                     }),
                     ..Default::default()
                 };
@@ -88,26 +87,44 @@ impl Program {
                     resolve_self_identifiers(unresolved_mark),
                     class_jobject(),
                     decorator_2022_03(),
-                    class_define_fields(),
-                    static_blocks(static_block_mark),
-                    common_js(
-                        unresolved_mark,
-                        common_js_config,
-                        available_set,
-                        Some(&self.comments)
-                    ),
-                    hygiene(),
-                    fixer(Some(&self.comments)),
-                    inject_helpers(top_level_mark),
+                    lazy_object_construction(),
+                    static_blocks(static_blocks_mark),
                 ));
+
+                if !opts.as_module {
+                    transformers = Box::new(chain!(
+                        transformers,
+                        common_js(
+                            unresolved_mark,
+                            common_js_config,
+                            available_set,
+                            Some(&self.comments)
+                        ),
+                    ));
+                }
 
                 if !opts.debug {
                     transformers = Box::new(chain!(transformers, remove_assert_calls()));
                 }
 
+                transformers = Box::new(chain!(
+                    transformers,
+                    hygiene_with_config(HygieneConfig {
+                        top_level_mark,
+                        ..Default::default()
+                    }),
+                ));
+
                 if opts.as_function {
-                    transformers = Box::new(chain!(transformers, wrap_in_function()));
+                    transformers =
+                        Box::new(chain!(transformers, wrap_in_function(unresolved_mark)));
                 }
+
+                transformers = Box::new(chain!(
+                    transformers,
+                    fixer(Some(&self.comments)),
+                    inject_helpers(top_level_mark),
+                ));
 
                 let program = self.program.fold_with(transformers.as_mut());
                 let mut buf = vec![];
@@ -152,6 +169,58 @@ mod tests {
     use crate::testing::uuid::reset_test_uuid;
 
     #[test]
+    pub fn should_compile_as_function_correctly() -> anyhow::Result<()> {
+        reset_test_uuid();
+
+        let code = r#"
+export default class TestClass {
+    constructor() {
+        require('vm');
+        console.log(this);
+    }
+}
+"#;
+        let program = code.parse_program(None)?;
+        let code = program.compile(CompileOptions {
+            as_function: true,
+            ..Default::default()
+        })?;
+
+        assert_eq!(
+            code,
+            r#"(function(exports, require, module, __filename, __dirname) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", {
+        value: true
+    });
+    Object.defineProperty(exports, "default", {
+        enumerable: true,
+        get: function() {
+            return _default;
+        }
+    });
+    var _initClass, _TestClass, _dec, __jymfony_JObject;
+    _dec = __jymfony_reflect("00000000-0000-0000-0000-000000000000", 0);
+    class TestClass extends (__jymfony_JObject = __jymfony.JObject) {
+        static #_ = { c: [_TestClass, _initClass] } = _apply_decs_2203_r(this, [], [
+            _dec
+        ], __jymfony_JObject);
+        constructor(){
+            super();
+            require('vm');
+            console.log(this);
+        }
+        static #_2 = _initClass();
+    }
+    const _default = _TestClass;
+});
+"#
+        );
+
+        Ok(())
+    }
+
+    #[test]
     pub fn should_add_explicit_constructor_to_decorator_metadata() -> anyhow::Result<()> {
         reset_test_uuid();
 
@@ -163,11 +232,7 @@ export default class TestClass {
 }
 "#;
         let program = code.parse_program(None)?;
-        let code = program.compile(CompileOptions {
-            debug: false,
-            namespace: None,
-            as_function: false,
-        })?;
+        let code = program.compile(Default::default())?;
 
         assert_eq!(
             code,
@@ -217,13 +282,7 @@ const parseHosts = (params, dsn) => {};
 export default class RedisAdapter {}
 "#;
         let program = code.parse_program(None).unwrap();
-        let code = program
-            .compile(CompileOptions {
-                debug: false,
-                namespace: None,
-                as_function: false,
-            })
-            .unwrap();
+        let code = program.compile(Default::default()).unwrap();
 
         assert_eq!(
             code,
@@ -277,13 +336,7 @@ class conn {
 }
 "#;
         let program = code.parse_program(None).unwrap();
-        let code = program
-            .compile(CompileOptions {
-                debug: false,
-                namespace: None,
-                as_function: false,
-            })
-            .unwrap();
+        let code = program.compile(Default::default()).unwrap();
 
         assert_eq!(
             code,
@@ -311,7 +364,7 @@ class conn extends (__jymfony_JObject = __jymfony.JObject) {
     ], __jymfony_JObject);
     constructor(){
         super();
-        this._cluster = new RedisCluster();
+        this._cluster = _construct_jobject(RedisCluster);
         this._redis = Redis;
     }
     static #_2 = _initClass();
@@ -336,11 +389,7 @@ export default class ClassLoaderTest extends TestCase {
 "#
         .parse_program(None)?;
 
-        let compiled = program.compile(CompileOptions {
-            debug: false,
-            namespace: None,
-            as_function: false,
-        })?;
+        let compiled = program.compile(Default::default())?;
 
         assert_eq!(
             compiled,
@@ -369,12 +418,8 @@ class ClassLoaderTest extends (_TestCase = TestCase) {
     ], [
         _dec
     ], _TestCase);
+    _classLoader = _init__classLoader(this);
     static #_2 = _initClass();
-    [Symbol.__jymfony_field_initialization]() {
-        const superCall = super[Symbol.__jymfony_field_initialization];
-        if (void 0 !== superCall) superCall.apply(this);
-        this._classLoader = _init__classLoader(this);
-    }
 }
 const _default = _ClassLoaderTest;
 "#
@@ -396,11 +441,7 @@ export default class YamlFileLoaderTest extends JsonFileLoaderTest {
 "#
         .parse_program(None)?;
 
-        let compiled = program.compile(CompileOptions {
-            debug: false,
-            namespace: None,
-            as_function: false,
-        })?;
+        let compiled = program.compile(Default::default())?;
 
         assert_eq!(
             compiled,
@@ -466,11 +507,7 @@ class TestAnnotation {
 "#
         .parse_program(None)?;
 
-        let compiled = program.compile(CompileOptions {
-            debug: false,
-            namespace: None,
-            as_function: false,
-        })?;
+        let compiled = program.compile(Default::default())?;
 
         assert_eq!(
             compiled,
@@ -546,11 +583,7 @@ export default class Debug {
 "#
         .parse_program(None)?;
 
-        let compiled = program.compile(CompileOptions {
-            debug: false,
-            namespace: None,
-            as_function: false,
-        })?;
+        let compiled = program.compile(Default::default())?;
 
         assert_eq!(
             compiled,
@@ -588,15 +621,103 @@ class Debug extends (__jymfony_JObject = __jymfony.JObject) {
     static enable() {
         __jymfony.autoload.debug = true;
         process.on('unhandledRejection', (reason, p)=>{
-            throw new UnhandledRejectionException(p, reason instanceof Error ? reason : undefined);
+            throw _construct_jobject(UnhandledRejectionException, p, reason instanceof Error ? reason : undefined);
         });
         __jymfony.ManagedProxy.enableDebug();
         Timeout.enable();
-        ErrorHandler.register(new ErrorHandler(new BufferingLogger(), true));
+        ErrorHandler.register(_construct_jobject(ErrorHandler, _construct_jobject(BufferingLogger), true));
     }
     static #_2 = _initClass();
 }
 const _default = _Debug;
+"#
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    pub fn should_compile_autoaccessors() -> anyhow::Result<()> {
+        reset_test_uuid();
+
+        let program = r#"
+const Constraint = Jymfony.Component.Validator.Annotation.Constraint;
+const Valid = Jymfony.Component.Validator.Constraints.Valid;
+const FooBarBaz = Jymfony.Component.Validator.Fixtures.Valid.FooBarBaz;
+
+export default class FooBar {
+    publicField = 'x';
+
+    @Constraint(Valid, { groups: [ 'nested' ]})
+    accessor fooBarBaz;
+
+    __construct() {
+        this.fooBarBaz = new FooBarBaz();
+    }
+}
+"#
+        .parse_program(None)?;
+
+        let compiled = program.compile(Default::default())?;
+
+        assert_eq!(
+            compiled,
+            r#""use strict";
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+Object.defineProperty(exports, "default", {
+    enumerable: true,
+    get: function() {
+        return _default;
+    }
+});
+var _initClass, _FooBar, _dec, __jymfony_JObject, _dec1, _dec2, _dec3, _dec4, _init_fooBarBaz, _init_publicField, _initProto;
+const Constraint = Jymfony.Component.Validator.Annotation.Constraint;
+const Valid = Jymfony.Component.Validator.Constraints.Valid;
+const FooBarBaz = Jymfony.Component.Validator.Fixtures.Valid.FooBarBaz;
+_dec = __jymfony_reflect("00000000-0000-0000-0000-000000000000", void 0), _dec1 = __jymfony_reflect("00000000-0000-0000-0000-000000000000", 0), _dec2 = Constraint(Valid, {
+    groups: [
+        'nested'
+    ]
+}), _dec3 = __jymfony_reflect("00000000-0000-0000-0000-000000000000", 1), _dec4 = __jymfony_reflect("00000000-0000-0000-0000-000000000000", 2);
+class FooBar extends (__jymfony_JObject = __jymfony.JObject) {
+    static #_ = { e: [_init_fooBarBaz, _init_publicField, _initProto], c: [_FooBar, _initClass] } = _apply_decs_2203_r(this, [
+        [
+            [
+                _dec2,
+                _dec3
+            ],
+            1,
+            "fooBarBaz"
+        ],
+        [
+            _dec4,
+            2,
+            "__construct"
+        ],
+        [
+            _dec1,
+            0,
+            "publicField"
+        ]
+    ], [
+        _dec
+    ], __jymfony_JObject);
+    publicField = _init_publicField(this, 'x');
+    #___private_fooBarBaz = (_initProto(this), _init_fooBarBaz(this));
+    get fooBarBaz() {
+        return this.#___private_fooBarBaz;
+    }
+    set fooBarBaz(_v) {
+        this.#___private_fooBarBaz = _v;
+    }
+    __construct() {
+        this.fooBarBaz = _construct_jobject(FooBarBaz);
+    }
+    static #_2 = _initClass();
+}
+const _default = _FooBar;
 "#
         );
 

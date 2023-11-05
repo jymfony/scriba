@@ -1,6 +1,6 @@
 {
   "name": "@jymfony/compiler",
-  "version": "0.5.0-alpha.2",
+  "version": "0.5.0-beta.1",
   "type": "commonjs",
   "author": "Alessandro Chitolina <alekitto@gmail.com>",
   "license": "MIT",
@@ -9,7 +9,7 @@
     "build": "wasm-pack build --out-name compiler --target nodejs --dev && RUSTFLAGS=\"-C target-feature=+simd128\" wasm-pack build --out-dir simd --out-name compiler --target nodejs --dev --features=simd --target-dir=simd-target",
     "pretest": "npm run build",
     "test": "mocha tests/wasm/",
-    "prepublishOnly": "npm run build-release && bash -c 'rm {pkg,simd}/{.gitignore,package.json}'"
+    "prepublishOnly": "npm run build-release && bash -c 'rm {pkg,simd}/{.gitignore,package.json,LICENSE}'"
   },
   "main": "index.js",
   "types": "index.d.ts",
@@ -23,6 +23,7 @@
     "index.js",
     "index.d.ts",
     "lib/_apply_decs_2203_r.js",
+    "lib/_construct_jobject.js",
     "lib/reflection.js",
     "pkg/compiler.js",
     "pkg/compiler.d.ts",
