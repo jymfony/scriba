@@ -5,12 +5,17 @@ const isSimdSupported = WebAssembly.validate(
         1, 8, 0, 65, 0, 253, 15, 253, 98, 11,
     ]),
 );
-const { compile, isValidIdentifier, prepareStackTrace, start } = isSimdSupported
-    ? require('./simd/compiler')
-    : require('./pkg/compiler');
+const {
+    compile,
+    getArgumentNames,
+    isValidIdentifier,
+    prepareStackTrace,
+    start,
+} = isSimdSupported ? require('./simd/compiler') : require('./pkg/compiler');
 
 exports._isSimdSupported = isSimdSupported;
 exports.compile = compile;
+exports.getArgumentNames = getArgumentNames;
 exports.isValidIdentifier = isValidIdentifier;
 exports.prepareStackTrace = prepareStackTrace;
 exports.start = start;

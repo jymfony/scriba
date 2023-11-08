@@ -73,3 +73,8 @@ pub fn is_valid_identifier(input: JsValue) -> bool {
         false
     }
 }
+
+#[wasm_bindgen(js_name = getArgumentNames)]
+pub fn get_argument_names(input: String) -> Result<Vec<String>, JsError> {
+    crate::parser::get_argument_names(&input).map_err(|e| JsError::new(&e.to_string()))
+}

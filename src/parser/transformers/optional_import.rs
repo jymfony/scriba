@@ -89,7 +89,7 @@ impl VisitMut for OptionalImport {
                     kv.key.as_ident().is_some_and(|i| i.sym == "optional")
                         && kv.value.as_lit().is_some_and(|l| match l {
                             Lit::Bool(b) => b.value,
-                            Lit::Str(s) => s.value.to_string() == "true",
+                            Lit::Str(s) => s.value == "true",
                             _ => false,
                         })
                 })

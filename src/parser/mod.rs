@@ -1,5 +1,5 @@
 use crate::SyntaxError;
-use anyhow::Result;
+use anyhow::{Error, Result};
 pub use program::CompileOptions;
 use program::Program;
 use std::path::PathBuf;
@@ -8,7 +8,7 @@ use swc_common::comments::SingleThreadedComments;
 use swc_common::input::StringInput;
 use swc_common::sync::Lrc;
 use swc_common::{BytePos, FileName};
-use swc_ecma_ast::EsVersion;
+use swc_ecma_ast::{EsVersion, Expr, Pat};
 use swc_ecma_parser::lexer::Lexer;
 use swc_ecma_parser::token::{IdentLike, Token, Word};
 use swc_ecma_parser::{EsConfig, Parser, Syntax, TsConfig};
@@ -18,7 +18,19 @@ mod sourcemap;
 mod transformers;
 mod util;
 
-pub const ES_VERSION: EsVersion = EsVersion::EsNext;
+const ES_VERSION: EsVersion = EsVersion::EsNext;
+const ES_CONFIG: EsConfig = EsConfig {
+    jsx: false,
+    fn_bind: false,
+    decorators: true,
+    decorators_before_export: false,
+    export_default_from: false,
+    import_attributes: true,
+    allow_super_outside_method: false,
+    allow_return_outside_function: true,
+    auto_accessors: true,
+    explicit_resource_management: true,
+};
 
 pub trait CodeParser {
     fn parse_program(self, filename: Option<&str>) -> Result<Program>;
@@ -51,18 +63,7 @@ impl CodeParser for &str {
                 disallow_ambiguous_jsx_like: false,
             })
         } else {
-            Syntax::Es(EsConfig {
-                jsx: false,
-                fn_bind: false,
-                decorators: true,
-                decorators_before_export: false,
-                export_default_from: false,
-                import_attributes: true,
-                allow_super_outside_method: false,
-                allow_return_outside_function: true,
-                auto_accessors: true,
-                explicit_resource_management: true,
-            })
+            Syntax::Es(ES_CONFIG)
         };
 
         let lexer = Lexer::new(
@@ -100,8 +101,8 @@ impl CodeParser for &str {
 
 pub fn is_valid_identifier(input: &str) -> bool {
     let lexer = Lexer::new(
-        Default::default(),
-        EsVersion::EsNext,
+        Syntax::Es(ES_CONFIG),
+        ES_VERSION,
         StringInput::new(input, BytePos(0), BytePos(input.len() as u32)),
         None,
     );
@@ -119,9 +120,43 @@ pub fn is_valid_identifier(input: &str) -> bool {
     }
 }
 
+fn process_pat(p: &Pat) -> String {
+    match p {
+        Pat::Ident(i) => i.sym.to_string(),
+        Pat::Rest(r) => process_pat(r.arg.as_ref()),
+        Pat::Assign(a) => process_pat(a.left.as_ref()),
+        _ => Default::default(),
+    }
+}
+
+pub fn get_argument_names(input: &str) -> Result<Vec<String>> {
+    let lexer = Lexer::new(
+        Syntax::Es(ES_CONFIG),
+        ES_VERSION,
+        StringInput::new(input, BytePos(0), BytePos(input.len() as u32)),
+        None,
+    );
+
+    let mut parser = Parser::new_from(lexer);
+    let expr = parser
+        .parse_expr()
+        .map_err(|e| Error::msg(e.kind().msg()))?;
+
+    match expr.as_ref() {
+        Expr::Arrow(arrow) => Ok(arrow.params.iter().map(process_pat).collect()),
+        Expr::Fn(func) => Ok(func
+            .function
+            .params
+            .iter()
+            .map(|p| process_pat(&p.pat))
+            .collect()),
+        _ => Err(Error::msg("not a function expression")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_identifier, CodeParser};
+    use super::{get_argument_names, is_valid_identifier, CodeParser};
     use crate::parser::transformers::decorator_2022_03;
     use crate::testing::exec_tr;
     use crate::testing::uuid::reset_test_uuid;
@@ -426,5 +461,33 @@ export default @logger.logged class x {
         assert!(is_valid_identifier("x"));
         assert!(is_valid_identifier("y"));
         assert!(is_valid_identifier("ident"));
+    }
+
+    #[test]
+    pub fn should_return_function_identifier() {
+        assert_eq!(
+            Vec::<&str>::new(),
+            get_argument_names(r#"function() {}"#).unwrap()
+        );
+        assert_eq!(
+            vec!["", "args"],
+            get_argument_names(r#"function([a, b], args) {}"#).unwrap()
+        );
+        assert_eq!(
+            vec!["context"],
+            get_argument_names(r#"function(context = {}) {}"#).unwrap()
+        );
+        assert_eq!(
+            vec!["obj"],
+            get_argument_names(r#"function(...obj = []) {}"#).unwrap()
+        );
+        assert_eq!(
+            vec!["context"],
+            get_argument_names(r#"(context = {}) => {}"#).unwrap()
+        );
+        assert_eq!(vec!["arg"], get_argument_names(r#"arg => arg"#).unwrap());
+
+        assert!(get_argument_names(r#"class x {}"#).is_err());
+        assert!(get_argument_names(r#"module.exports = function () {}"#).is_err());
     }
 }
