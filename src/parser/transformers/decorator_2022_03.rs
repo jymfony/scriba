@@ -31,7 +31,7 @@ const PARAM: usize = 5;
 const STATIC: usize = 6;
 const CLASS: usize = 20;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Decorator202203 {
     /// Variables without initializer.
     extra_vars: Vec<VarDeclarator>,
@@ -49,7 +49,7 @@ struct Decorator202203 {
     extra_exports: Vec<ExportSpecifier>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct ClassState {
     static_lhs: Vec<Ident>,
     proto_lhs: Vec<Ident>,
@@ -523,7 +523,7 @@ impl Decorator202203 {
         }
     }
 
-    /// Returns (name, initilaizer_name)
+    /// Returns (name, initializer_name)
     fn initializer_name(&mut self, name: &mut PropName, prefix: &str) -> (Box<Expr>, Ident) {
         match name {
             PropName::Ident(i) => (
@@ -1734,14 +1734,18 @@ impl VisitMut for Decorator202203 {
     fn visit_mut_expr(&mut self, e: &mut Expr) {
         if let Expr::Class(c) = e {
             if !c.class.decorators.is_empty() {
-                let new = self.handle_class_expr(&mut c.class, c.ident.as_ref());
+                let state = self.state.clone();
+                self.state = Default::default();
 
+                let new = self.handle_class_expr(&mut c.class, c.ident.as_ref());
                 c.visit_mut_with(self);
 
                 *e = Expr::Seq(SeqExpr {
                     span: DUMMY_SP,
                     exprs: vec![Box::new(e.take()), Box::new(Expr::Ident(new))],
                 });
+
+                self.state = state;
 
                 return;
             }
@@ -1792,6 +1796,9 @@ impl VisitMut for Decorator202203 {
             })) = &mut n
             {
                 if !c.class.decorators.is_empty() {
+                    let state = self.state.clone();
+                    self.state = Default::default();
+
                     let new_class_name = self.handle_class_expr(&mut c.class, c.ident.as_ref());
                     c.visit_mut_children_with(self);
 
@@ -1837,6 +1844,8 @@ impl VisitMut for Decorator202203 {
                             expr: Box::new(Expr::Ident(new_class_name)),
                         },
                     )));
+
+                    self.state = state;
 
                     continue;
                 }

@@ -723,4 +723,184 @@ const _default = _FooBar;
 
         Ok(())
     }
+
+    #[test]
+    pub fn should_compile_nested_classes() -> anyhow::Result<()> {
+        reset_test_uuid();
+
+        let program = r#"
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Mutex = void 0;
+const Deferred_js_1 = require("./Deferred.js");
+const disposable_js_1 = require("./disposable.js");
+/**
+ * @internal
+ */
+class Mutex {
+    static Guard = class Guard {
+        #mutex;
+        constructor(mutex) {
+            this.#mutex = mutex;
+        }
+        [disposable_js_1.disposeSymbol]() {
+            return this.#mutex.release();
+        }
+    };
+    #locked = false;
+    #acquirers = [];
+    // This is FIFO.
+    async acquire() {
+        if (!this.#locked) {
+            this.#locked = true;
+            return new Mutex.Guard(this);
+        }
+        const deferred = Deferred_js_1.Deferred.create();
+        this.#acquirers.push(deferred.resolve.bind(deferred));
+        await deferred.valueOrThrow();
+        return new Mutex.Guard(this);
+    }
+    release() {
+        const resolve = this.#acquirers.shift();
+        if (!resolve) {
+            this.#locked = false;
+            return;
+        }
+        resolve();
+    }
+}
+exports.Mutex = Mutex;
+"#
+        .parse_program(None)?;
+
+        let compiled = program.compile(Default::default())?;
+
+        assert_eq!(
+            compiled,
+            r#""use strict";
+function _identity(x) {
+    return x;
+}
+var _dec, _initClass, __jymfony_JObject, _dec1, _dec2, _dec3, _dec4, _dec5, _initClass1, _Guard, _dec6, __jymfony_JObject1, _dec7, _dec8, _computedKey, _init_mutex, _initProto, _init_Guard, _init_locked, _init_acquirers, _initProto1;
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+exports.Mutex = void 0;
+const Deferred_js_1 = require("./Deferred.js");
+const disposable_js_1 = require("./disposable.js");
+let _Mutex;
+_dec = __jymfony_reflect("00000000-0000-0000-0000-000000000000", void 0), _dec1 = __jymfony_reflect("00000000-0000-0000-0000-000000000000", 0), _dec2 = __jymfony_reflect("00000000-0000-0000-0000-000000000000", 1), _dec3 = __jymfony_reflect("00000000-0000-0000-0000-000000000000", 2), _dec4 = __jymfony_reflect("00000000-0000-0000-0000-000000000000", 3), _dec5 = __jymfony_reflect("00000000-0000-0000-0000-000000000000", 4), _dec6 = __jymfony_reflect("00000000-0000-0000-0000-000000000001", 1), _dec7 = __jymfony_reflect("00000000-0000-0000-0000-000000000001", 0), _dec8 = __jymfony_reflect("00000000-0000-0000-0000-000000000001", 2), _computedKey = disposable_js_1.disposeSymbol;
+_construct_jobject(class extends _identity {
+    constructor(){
+        super(_Mutex), _initClass();
+    }
+    static #_ = (()=>{
+        class Mutex extends (__jymfony_JObject = __jymfony.JObject) {
+            static #_ = { e: [_init_Guard, _init_locked, _init_acquirers, _initProto1], c: [_Mutex, _initClass] } = _apply_decs_2203_r(this, [
+                [
+                    _dec1,
+                    6,
+                    "Guard"
+                ],
+                [
+                    _dec4,
+                    2,
+                    "acquire"
+                ],
+                [
+                    _dec5,
+                    2,
+                    "release"
+                ],
+                [
+                    _dec2,
+                    0,
+                    "locked",
+                    function() {
+                        return this.#locked;
+                    },
+                    function(value) {
+                        this.#locked = value;
+                    }
+                ],
+                [
+                    _dec3,
+                    0,
+                    "acquirers",
+                    function() {
+                        return this.#acquirers;
+                    },
+                    function(value) {
+                        this.#acquirers = value;
+                    }
+                ]
+            ], [
+                _dec
+            ], __jymfony_JObject);
+            constructor(...args){
+                super(...args);
+                _initProto1(this);
+            }
+            static Guard = _init_Guard(this, (class Guard extends (__jymfony_JObject1 = __jymfony.JObject) {
+                static #_ = { e: [_init_mutex, _initProto], c: [_Guard, _initClass1] } = _apply_decs_2203_r(this, [
+                    [
+                        _dec8,
+                        2,
+                        _computedKey
+                    ],
+                    [
+                        _dec7,
+                        0,
+                        "mutex",
+                        function() {
+                            return this.#mutex;
+                        },
+                        function(value) {
+                            this.#mutex = value;
+                        }
+                    ]
+                ], [
+                    _dec6
+                ], __jymfony_JObject1);
+                #mutex = _init_mutex(this);
+                constructor(mutex){
+                    super();
+                    _initProto(this);
+                    this.#mutex = mutex;
+                }
+                [_computedKey]() {
+                    return this.#mutex.release();
+                }
+                static #_2 = _initClass1();
+            }, _Guard));
+            #locked = _init_locked(this, false);
+            #acquirers = _init_acquirers(this, []);
+            // This is FIFO.
+            async acquire() {
+                if (!this.#locked) {
+                    this.#locked = true;
+                    return _construct_jobject(Mutex.Guard, this);
+                }
+                const deferred = Deferred_js_1.Deferred.create();
+                this.#acquirers.push(deferred.resolve.bind(deferred));
+                await deferred.valueOrThrow();
+                return _construct_jobject(Mutex.Guard, this);
+            }
+            release() {
+                const resolve = this.#acquirers.shift();
+                if (!resolve) {
+                    this.#locked = false;
+                    return;
+                }
+                resolve();
+            }
+        }
+    })();
+});
+exports.Mutex = _Mutex;
+"#
+        );
+
+        Ok(())
+    }
 }
