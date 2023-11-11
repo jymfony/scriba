@@ -28,6 +28,7 @@ jobs:
 
             - name: Run Rust tests
               run: |
+                  rustup component add llvm-tools-preview
                   cargo install --force grcov
                   npm install -g mocha
                   npm ci
