@@ -22,7 +22,7 @@ extern "C" {
     #[wasm_bindgen(static_method_of = Error, getter = prepareStackTrace)]
     pub fn prepare_stack_trace() -> Option<Function>;
     #[wasm_bindgen(static_method_of = Error, setter = prepareStackTrace)]
-    pub fn set_prepare_stack_trace(closure: &Function);
+    pub fn set_prepare_stack_trace(closure: JsValue);
 
     #[wasm_bindgen(static_method_of = Error, setter = stackTraceLimit)]
     pub fn set_stack_trace_limit(val: usize);

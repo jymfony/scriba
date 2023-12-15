@@ -38,11 +38,11 @@ pub fn start() {
     let a = Closure::<dyn Fn(Error, Box<[CallSite]>) -> String>::new(
         move |error: Error, stack: Box<[CallSite]>| -> String {
             let prev = if let Some(func) = &previous {
-                let this = &JsValue::null();
+                let this = JsValue::null();
                 let e = JsValue::from(&error);
                 let s = Array::from_iter(stack.iter());
 
-                if let Ok(val) = func.call2(this, &e, &s) {
+                if let Ok(val) = func.call2(&this, &e, &s) {
                     val.as_string()
                 } else {
                     None
@@ -56,6 +56,5 @@ pub fn start() {
     );
 
     Error::set_stack_trace_limit(255);
-    Error::set_prepare_stack_trace(a.as_ref().unchecked_ref());
-    a.forget();
+    Error::set_prepare_stack_trace(a.into_js_value());
 }
