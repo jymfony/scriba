@@ -80,7 +80,7 @@ impl Program {
                         opts.namespace.as_deref(),
                         self.comments.clone()
                     ),
-                    strip(top_level_mark),
+                    strip(unresolved_mark, top_level_mark),
                     optional_import(unresolved_mark),
                     nullish_coalescing(Default::default()),
                     optional_chaining(Default::default(), unresolved_mark),
@@ -143,9 +143,7 @@ impl Program {
 
                 let mut src = String::from_utf8(buf).expect("non-utf8?");
                 if let Some(f) = self.filename.as_deref() {
-                    let srcmap = self
-                        .source_map
-                        .build_source_map_from(&sm, self.orig_srcmap.as_ref());
+                    let srcmap = self.source_map.build_source_map_from(&sm, self.orig_srcmap);
 
                     register_source_map(f.to_string(), srcmap.clone());
 
@@ -705,12 +703,12 @@ class FooBar extends (__jymfony_JObject = __jymfony.JObject) {
         _dec
     ], __jymfony_JObject);
     publicField = _init_publicField(this, 'x');
-    #___private_fooBarBaz = (_initProto(this), _init_fooBarBaz(this));
+    #___private_fooBarBaz_1 = (_initProto(this), _init_fooBarBaz(this));
     get fooBarBaz() {
-        return this.#___private_fooBarBaz;
+        return this.#___private_fooBarBaz_1;
     }
     set fooBarBaz(_v) {
-        this.#___private_fooBarBaz = _v;
+        this.#___private_fooBarBaz_1 = _v;
     }
     __construct() {
         this.fooBarBaz = _construct_jobject(FooBarBaz);

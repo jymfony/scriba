@@ -36,7 +36,7 @@ impl VisitMut for ResolveSelfIdentifiers {
     }
 
     fn visit_mut_ident(&mut self, n: &mut Ident) {
-        if n.span.ctxt == self.unresolved && n.sym == "__self" {
+        if n.ctxt == self.unresolved && n.sym == "__self" {
             let Some(current_class) = self.class_stack.last() else {
                 return;
             };

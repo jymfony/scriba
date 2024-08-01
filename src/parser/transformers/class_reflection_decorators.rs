@@ -6,7 +6,7 @@ use std::rc::Rc;
 use swc_common::comments::{CommentKind, Comments};
 use swc_common::{Span, Spanned, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_utils::{undefined, ExprFactory};
+use swc_ecma_utils::ExprFactory;
 use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
 
 pub fn class_reflection_decorators<'a, C: Comments + 'a>(
@@ -68,9 +68,9 @@ impl<'a, C: Comments> ClassReflectionDecorators<'a, C> {
                         .enumerate()
                         .find(|(_, m)| matches!(m, ClassMember::Constructor(_)))
                         .map(|(idx, _)| idx.as_arg())
-                        .unwrap_or_else(|| undefined(DUMMY_SP).as_arg()),
+                        .unwrap_or_else(|| Expr::undefined(DUMMY_SP).as_arg()),
                 ],
-                type_args: None,
+                ..Default::default()
             })),
         });
 
@@ -79,7 +79,7 @@ impl<'a, C: Comments> ClassReflectionDecorators<'a, C> {
                 span: DUMMY_SP,
                 callee: ident("__jymfony_reflect").as_callee(),
                 args: vec![id.to_string().as_arg(), idx.as_arg()],
-                type_args: None,
+                ..Default::default()
             });
 
             let span = member.span();

@@ -1,6 +1,6 @@
 use core::fmt::{Debug, Display, Formatter};
 use std::error::Error;
-use swc_common::source_map::Pos;
+use swc_common::source_map::SmallPos;
 use swc_common::{SourceFile, Spanned};
 
 #[derive(Debug)]

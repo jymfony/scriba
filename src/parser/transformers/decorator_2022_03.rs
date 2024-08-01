@@ -1,24 +1,20 @@
-use std::{
-    iter::once,
-    mem::{take, transmute},
-};
-
-use crate::parser::util::ident;
+use crate::parser::util::{ident, ident_name};
 use rustc_hash::FxHashMap;
+use std::{collections::VecDeque, iter::once, mem::take};
 use swc_atoms::JsWord;
-use swc_common::{util::take::Take, Spanned, SyntaxContext, DUMMY_SP};
+use swc_common::{util::take::Take, Mark, Spanned, SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::Expr::Bin;
 use swc_ecma_ast::*;
 use swc_ecma_transforms_base::helper_expr;
 use swc_ecma_utils::{
-    alias_ident_for, constructor::inject_after_super, default_constructor, prepend_stmt,
-    private_ident, prop_name_to_expr_value, quote_ident, replace_ident, undefined, ExprFactory,
-    IdentExt, IdentRenamer,
+    alias_ident_for, constructor::inject_after_super, default_constructor,
+    is_maybe_branch_directive, prepend_stmt, private_ident, prop_name_to_expr_value, replace_ident,
+    stack_size::maybe_grow_default, ExprFactory, IdentRenamer,
 };
 use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
 
 pub fn decorator_2022_03() -> impl VisitMut + Fold {
-    as_folder(Decorator202203::default())
+    as_folder(Decorator2022_03::default())
 }
 
 const FIELD: usize = 0;
@@ -32,7 +28,7 @@ const STATIC: usize = 6;
 const CLASS: usize = 20;
 
 #[derive(Default, Clone)]
-struct Decorator202203 {
+struct Decorator2022_03 {
     /// Variables without initializer.
     extra_vars: Vec<VarDeclarator>,
 
@@ -51,6 +47,8 @@ struct Decorator202203 {
 
 #[derive(Default, Clone)]
 struct ClassState {
+    private_id_index: u32,
+
     static_lhs: Vec<Ident>,
     proto_lhs: Vec<Ident>,
 
@@ -71,7 +69,7 @@ struct ClassState {
     super_class: Option<Ident>,
 }
 
-impl Decorator202203 {
+impl Decorator2022_03 {
     fn process_param_decorators(&mut self, m: &mut ClassMember) {
         let is_constructor = matches!(m, ClassMember::Constructor(_));
         let mut n = match m {
@@ -85,8 +83,8 @@ impl Decorator202203 {
                         span: p.span,
                         decorators: p.decorators.take(),
                         pat: match &p.param {
-                            TsParamPropParam::Assign(pat) => Pat::Assign(pat.clone()),
-                            TsParamPropParam::Ident(ident) => Pat::Ident(ident.clone()),
+                            TsParamPropParam::Assign(pat) => pat.clone().into(),
+                            TsParamPropParam::Ident(ident) => ident.clone().into(),
                         },
                     },
                     ParamOrTsParamProp::Param(p) => {
@@ -113,7 +111,7 @@ impl Decorator202203 {
             let init = private_ident!(format!("_param{}_init", i));
             self.extra_vars.push(VarDeclarator {
                 span: p.span,
-                name: Pat::Ident(init.clone().into()),
+                name: init.clone().into(),
                 init: None,
                 definite: false,
             });
@@ -142,72 +140,88 @@ impl Decorator202203 {
                     Pat::Ident(i) => i.id.clone(),
                     Pat::Array(a) => {
                         let ident = private_ident!(format!("_rest_param{}", i));
-                        pre_stmts.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
-                            span: DUMMY_SP,
-                            kind: VarDeclKind::Let,
-                            declare: false,
-                            decls: vec![VarDeclarator {
+                        pre_stmts.push(
+                            VarDecl {
                                 span: DUMMY_SP,
-                                name: Pat::Array(a.clone()),
-                                init: Some(Box::new(Expr::Ident(ident.clone()))),
-                                definite: false,
-                            }],
-                        }))));
+                                kind: VarDeclKind::Let,
+                                declare: false,
+                                decls: vec![VarDeclarator {
+                                    span: DUMMY_SP,
+                                    name: Pat::Array(a.clone()),
+                                    init: Some(ident.clone().into()),
+                                    definite: false,
+                                }],
+                                ..Default::default()
+                            }
+                            .into(),
+                        );
 
-                        r.arg = Box::new(Pat::Ident(ident.clone().into()));
+                        r.arg = ident.clone().into();
                         ident
                     }
                     Pat::Object(o) => {
                         let ident = private_ident!(format!("_rest_param{}", i));
-                        pre_stmts.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
-                            span: DUMMY_SP,
-                            kind: VarDeclKind::Let,
-                            declare: false,
-                            decls: vec![VarDeclarator {
+                        pre_stmts.push(
+                            VarDecl {
                                 span: DUMMY_SP,
-                                name: Pat::Object(o.clone()),
-                                init: Some(Box::new(Expr::Ident(ident.clone()))),
-                                definite: false,
-                            }],
-                        }))));
+                                kind: VarDeclKind::Let,
+                                declare: false,
+                                decls: vec![VarDeclarator {
+                                    span: DUMMY_SP,
+                                    name: Pat::Object(o.clone()),
+                                    init: Some(ident.clone().into()),
+                                    definite: false,
+                                }],
+                                ..Default::default()
+                            }
+                            .into(),
+                        );
 
-                        r.arg = Box::new(Pat::Ident(ident.clone().into()));
+                        r.arg = ident.clone().into();
                         ident
                     }
                     _ => unreachable!("{}:{}", file!(), line!()),
                 },
                 Pat::Array(a) => {
                     let ident = private_ident!(format!("_param{}", i));
-                    pre_stmts.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
-                        span: DUMMY_SP,
-                        kind: VarDeclKind::Let,
-                        declare: false,
-                        decls: vec![VarDeclarator {
+                    pre_stmts.push(
+                        VarDecl {
                             span: DUMMY_SP,
-                            name: Pat::Array(a.clone()),
-                            init: Some(Box::new(Expr::Ident(ident.clone()))),
-                            definite: false,
-                        }],
-                    }))));
+                            kind: VarDeclKind::Let,
+                            declare: false,
+                            decls: vec![VarDeclarator {
+                                span: DUMMY_SP,
+                                name: Pat::Array(a.clone()),
+                                init: Some(ident.clone().into()),
+                                definite: false,
+                            }],
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
 
-                    p.pat = Pat::Ident(ident.clone().into());
+                    p.pat = ident.clone().into();
                     ident
                 }
                 Pat::Object(o) => {
                     let ident = private_ident!(format!("_param{}", i));
-                    pre_stmts.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
-                        span: DUMMY_SP,
-                        kind: VarDeclKind::Let,
-                        declare: false,
-                        decls: vec![VarDeclarator {
+                    pre_stmts.push(
+                        VarDecl {
                             span: DUMMY_SP,
-                            name: Pat::Object(o.clone()),
-                            init: Some(Box::new(Expr::Ident(ident.clone()))),
-                            definite: false,
-                        }],
-                    }))));
+                            kind: VarDeclKind::Let,
+                            declare: false,
+                            decls: vec![VarDeclarator {
+                                span: DUMMY_SP,
+                                name: Pat::Object(o.clone()),
+                                init: Some(ident.clone().into()),
+                                definite: false,
+                            }],
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
 
-                    p.pat = Pat::Ident(ident.clone().into());
+                    p.pat = ident.clone().into();
                     ident
                 }
                 Pat::Assign(..) | Pat::Invalid(..) | Pat::Expr(..) => {
@@ -228,38 +242,39 @@ impl Decorator202203 {
                 test: Box::new(Bin(BinExpr {
                     span: DUMMY_SP,
                     op: BinaryOp::NotEqEq,
-                    left: Box::new(Expr::Ident(init.clone())),
-                    right: undefined(DUMMY_SP),
+                    left: init.clone().into(),
+                    right: Expr::undefined(DUMMY_SP),
                 })),
                 cons: Box::new(Stmt::Expr(ExprStmt {
                     span: DUMMY_SP,
                     expr: Box::new(Expr::Assign(AssignExpr {
                         span: DUMMY_SP,
                         op: AssignOp::Assign,
-                        left: PatOrExpr::Pat(Box::new(Pat::Ident(param_ident.clone().into()))),
-                        right: Box::new(Expr::Call(CallExpr {
+                        left: param_ident.clone().into(),
+                        right: CallExpr {
                             span: DUMMY_SP,
                             callee: Expr::Member(MemberExpr {
                                 span: DUMMY_SP,
-                                obj: Box::new(Expr::Ident(init)),
-                                prop: MemberProp::Ident(ident("call")),
+                                obj: init.into(),
+                                prop: MemberProp::Ident(ident_name("call")),
                             })
                             .as_callee(),
                             args: vec![
                                 if is_constructor && self.state.super_class.is_some() {
-                                    undefined(DUMMY_SP).as_arg()
+                                    Expr::undefined(DUMMY_SP).as_arg()
                                 } else {
                                     ThisExpr::dummy().as_arg()
                                 },
                                 if is_constructor && self.state.super_class.is_some() {
-                                    undefined(DUMMY_SP).as_arg()
+                                    Expr::undefined(DUMMY_SP).as_arg()
                                 } else {
                                     ThisExpr::dummy().as_arg()
                                 },
                                 param_ident.as_arg(),
                             ],
-                            type_args: None,
-                        })),
+                            ..Default::default()
+                        }
+                        .into(),
                     })),
                 })),
                 alt: None,
@@ -272,7 +287,7 @@ impl Decorator202203 {
                         ClassMember::Constructor(..) => {
                             vec![
                                 Some(CLASS.as_arg()),
-                                Some(undefined(DUMMY_SP).as_arg()),
+                                Some(Expr::undefined(DUMMY_SP).as_arg()),
                                 Some(0_usize.as_arg()),
                             ]
                         }
@@ -304,7 +319,7 @@ impl Decorator202203 {
                                     } + if cm.is_static { STATIC } else { 0 })
                                     .as_arg(),
                                 ),
-                                Some(cm.key.id.sym.clone().as_arg()),
+                                Some(cm.key.name.clone().as_arg()),
                                 Some(1_usize.as_arg()),
                             ]
                         }
@@ -320,8 +335,8 @@ impl Decorator202203 {
                     elems: vec![
                         dec,
                         Some(PARAM.as_arg()),
-                        name.map(|n| n.sym.as_arg())
-                            .or_else(|| Some(undefined(DUMMY_SP).as_arg())),
+                        name.map(|n| n.sym.clone().as_arg())
+                            .or_else(|| Some(Expr::undefined(DUMMY_SP).as_arg())),
                         Some(i.as_arg()),
                         Some(if p.pat.is_rest() { 1_usize } else { 0_usize }.as_arg()),
                         func,
@@ -376,16 +391,19 @@ impl Decorator202203 {
         let ident = private_ident!("_dec");
         self.extra_vars.push(VarDeclarator {
             span: DUMMY_SP,
-            name: Pat::Ident(ident.clone().into()),
+            name: ident.clone().into(),
             init: None,
             definite: false,
         });
-        self.pre_class_inits.push(Box::new(Expr::Assign(AssignExpr {
-            span: DUMMY_SP,
-            op: op!("="),
-            left: ident.clone().into(),
-            right: dec,
-        })));
+        self.pre_class_inits.push(
+            AssignExpr {
+                span: DUMMY_SP,
+                op: op!("="),
+                left: ident.clone().into(),
+                right: dec,
+            }
+            .into(),
+        );
 
         ident.into()
     }
@@ -416,7 +434,7 @@ impl Decorator202203 {
         if let Some(init) = self.state.init_proto.clone() {
             self.extra_vars.push(VarDeclarator {
                 span: DUMMY_SP,
-                name: Pat::Ident(init.clone().into()),
+                name: init.clone().into(),
                 init: None,
                 definite: false,
             });
@@ -427,7 +445,7 @@ impl Decorator202203 {
         if let Some(init) = self.state.init_static.clone() {
             self.extra_vars.push(VarDeclarator {
                 span: DUMMY_SP,
-                name: Pat::Ident(init.clone().into()),
+                name: init.clone().into(),
                 init: None,
                 definite: false,
             });
@@ -464,13 +482,14 @@ impl Decorator202203 {
             None
         } else {
             Some(ObjectPatProp::KeyValue(KeyValuePatProp {
-                key: PropName::Ident(quote_ident!("e")),
-                value: Box::new(Pat::Array(ArrayPat {
+                key: PropName::Ident("e".into()),
+                value: ArrayPat {
                     span: DUMMY_SP,
                     elems: e_lhs,
                     type_ann: Default::default(),
                     optional: false,
-                })),
+                }
+                .into(),
             }))
         };
 
@@ -478,32 +497,36 @@ impl Decorator202203 {
             None
         } else {
             Some(ObjectPatProp::KeyValue(KeyValuePatProp {
-                key: PropName::Ident(quote_ident!("c")),
-                value: Box::new(Pat::Array(ArrayPat {
+                key: PropName::Ident("c".into()),
+                value: ArrayPat {
                     span: DUMMY_SP,
                     elems: self.state.class_lhs.take(),
                     type_ann: Default::default(),
                     optional: false,
-                })),
+                }
+                .into(),
             }))
         };
 
-        let expr = Box::new(Expr::Assign(AssignExpr {
+        let expr = AssignExpr {
             span: DUMMY_SP,
             op: op!("="),
-            left: PatOrExpr::Pat(Box::new(Pat::Object(ObjectPat {
+            left: ObjectPat {
                 span: DUMMY_SP,
                 props: e_pat.into_iter().chain(c_pat).collect(),
                 optional: false,
                 type_ann: None,
-            }))),
-            right: Box::new(Expr::Call(CallExpr {
+            }
+            .into(),
+            right: CallExpr {
                 span: DUMMY_SP,
                 callee: ident("_apply_decs_2203_r").as_callee(),
                 args: combined_args,
-                type_args: Default::default(),
-            })),
-        }));
+                ..Default::default()
+            }
+            .into(),
+        }
+        .into();
 
         self.state.extra_stmts.push(Stmt::Expr(ExprStmt {
             span: DUMMY_SP,
@@ -513,12 +536,13 @@ impl Decorator202203 {
         if let Some(init) = self.state.init_static.take() {
             self.state.extra_stmts.push(Stmt::Expr(ExprStmt {
                 span: DUMMY_SP,
-                expr: Box::new(Expr::Call(CallExpr {
+                expr: CallExpr {
                     span: DUMMY_SP,
                     callee: init.as_callee(),
                     args: vec![ThisExpr { span: DUMMY_SP }.as_arg()],
-                    type_args: Default::default(),
-                })),
+                    ..Default::default()
+                }
+                .into(),
             }));
         }
     }
@@ -527,106 +551,131 @@ impl Decorator202203 {
     fn initializer_name(&mut self, name: &mut PropName, prefix: &str) -> (Box<Expr>, Ident) {
         match name {
             PropName::Ident(i) => (
-                Box::new(Expr::Lit(Lit::Str(Str {
-                    span: i.span.with_ctxt(SyntaxContext::empty()),
+                Lit::Str(Str {
+                    span: i.span,
                     value: i.sym.clone(),
                     raw: None,
-                }))),
-                Ident::new(format!("_{prefix}_{}", i.sym).into(), i.span.private()),
+                })
+                .into(),
+                Ident::new(
+                    format!("_{prefix}_{}", i.sym).into(),
+                    i.span,
+                    SyntaxContext::empty().apply_mark(Mark::new()),
+                ),
             ),
             PropName::Computed(c) if c.expr.is_ident() => match &*c.expr {
                 Expr::Ident(i) => (
-                    Box::new(Expr::Ident(i.clone())),
-                    Ident::new(format!("_{prefix}_{}", i.sym).into(), i.span.private()),
+                    i.clone().into(),
+                    Ident::new(
+                        format!("_{prefix}_{}", i.sym).into(),
+                        i.span,
+                        SyntaxContext::empty().apply_mark(Mark::new()),
+                    ),
                 ),
                 _ => {
                     unreachable!("{}:{}", file!(), line!())
                 }
             },
             _ => {
-                let ident = private_ident!("_computedKey");
+                let key_ident = private_ident!("_computedKey");
                 self.extra_vars.push(VarDeclarator {
                     span: DUMMY_SP,
-                    name: Pat::Ident(ident.clone().into()),
+                    name: key_ident.clone().into(),
                     init: None,
                     definite: false,
                 });
 
-                self.pre_class_inits.push(Box::new(Expr::Assign(AssignExpr {
-                    span: DUMMY_SP,
-                    op: op!("="),
-                    left: PatOrExpr::Pat(ident.clone().into()),
-                    right: Box::new(prop_name_to_expr_value(name.take())),
-                })));
+                self.pre_class_inits.push(
+                    AssignExpr {
+                        span: DUMMY_SP,
+                        op: op!("="),
+                        left: key_ident.clone().into(),
+                        right: Box::new(prop_name_to_expr_value(name.take())),
+                    }
+                    .into(),
+                );
                 *name = PropName::Computed(ComputedPropName {
                     span: DUMMY_SP,
-                    expr: ident.clone().into(),
+                    expr: key_ident.clone().into(),
                 });
 
                 let init = Ident::new(
                     format!("_{prefix}_computedKey").into(),
-                    ident.span.private(),
+                    key_ident.span,
+                    SyntaxContext::empty().apply_mark(Mark::new()),
                 );
 
-                (Box::new(Expr::Ident(ident)), init)
+                (key_ident.into(), init)
             }
         }
     }
 
     fn ensure_constructor<'a>(&mut self, c: &'a mut Class) -> &'a mut Constructor {
-        for member in c.body.iter_mut() {
+        let mut insert_index = 0;
+        for (i, member) in c.body.iter().enumerate() {
             if let ClassMember::Constructor(constructor) = member {
-                return unsafe {
-                    // Safety: We need polonius
-                    transmute::<&mut Constructor, &'a mut Constructor>(constructor)
-                };
-            }
-        }
-
-        c.body
-            .insert(0, default_constructor(c.super_class.is_some()).into());
-
-        for member in c.body.iter_mut() {
-            if let ClassMember::Constructor(constructor) = member {
-                return constructor;
-            }
-        }
-
-        unreachable!("{}:{}", file!(), line!())
-    }
-
-    fn ensure_identity_constructor<'a>(&mut self, c: &'a mut Class) -> &'a mut Constructor {
-        for member in c.body.iter_mut() {
-            if let ClassMember::Constructor(constructor) = member {
-                return unsafe {
-                    // Safety: We need polonius
-                    transmute::<&mut Constructor, &'a mut Constructor>(constructor)
-                };
+                // decorators occur before typescript's type strip, so skip ctor overloads
+                if constructor.body.is_some() {
+                    if let Some(ClassMember::Constructor(c)) = c.body.get_mut(i) {
+                        return c;
+                    } else {
+                        unreachable!()
+                    }
+                } else {
+                    insert_index = i + 1;
+                }
             }
         }
 
         c.body.insert(
-            0,
+            insert_index,
+            default_constructor(c.super_class.is_some()).into(),
+        );
+
+        if let Some(ClassMember::Constructor(c)) = c.body.get_mut(insert_index) {
+            c
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn ensure_identity_constructor<'a>(&mut self, c: &'a mut Class) -> &'a mut Constructor {
+        let mut insert_index = 0;
+        for (i, member) in c.body.iter().enumerate() {
+            if let ClassMember::Constructor(constructor) = member {
+                // decorators occur before typescript's type strip, so skip ctor overloads
+                if constructor.body.is_some() {
+                    if let Some(ClassMember::Constructor(c)) = c.body.get_mut(i) {
+                        return c;
+                    } else {
+                        unreachable!()
+                    }
+                } else {
+                    insert_index = i + 1;
+                }
+            }
+        }
+
+        c.body.insert(
+            insert_index,
             ClassMember::Constructor(Constructor {
                 span: DUMMY_SP,
-                key: PropName::Ident(quote_ident!("constructor")),
+                key: PropName::Ident("constructor".into()),
                 params: vec![],
                 body: Some(BlockStmt {
                     span: DUMMY_SP,
                     stmts: vec![],
+                    ..Default::default()
                 }),
-                accessibility: Default::default(),
-                is_optional: Default::default(),
+                ..Default::default()
             }),
         );
 
-        for member in c.body.iter_mut() {
-            if let ClassMember::Constructor(constructor) = member {
-                return constructor;
-            }
+        if let Some(ClassMember::Constructor(c)) = c.body.get_mut(insert_index) {
+            c
+        } else {
+            unreachable!()
         }
-
-        unreachable!("{}:{}", file!(), line!())
     }
 
     fn handle_super_class(&mut self, class: &mut Class) {
@@ -634,17 +683,20 @@ impl Decorator202203 {
             let id = alias_ident_for(&super_class, "_super");
             self.extra_vars.push(VarDeclarator {
                 span: DUMMY_SP,
-                name: Pat::Ident(id.clone().into()),
+                name: id.clone().into(),
                 init: None,
                 definite: false,
             });
 
-            class.super_class = Some(Box::new(Expr::Assign(AssignExpr {
-                span: DUMMY_SP,
-                op: AssignOp::Assign,
-                left: PatOrExpr::Pat(Box::new(Pat::Ident(id.clone().into()))),
-                right: super_class,
-            })));
+            class.super_class = Some(
+                AssignExpr {
+                    span: DUMMY_SP,
+                    op: AssignOp::Assign,
+                    left: id.clone().into(),
+                    right: super_class,
+                }
+                .into(),
+            );
 
             self.state.super_class = Some(id);
         }
@@ -660,7 +712,7 @@ impl Decorator202203 {
 
         self.extra_vars.push(VarDeclarator {
             span: DUMMY_SP,
-            name: Pat::Ident(init_class.clone().into()),
+            name: init_class.clone().into(),
             init: None,
             definite: false,
         });
@@ -681,7 +733,7 @@ impl Decorator202203 {
 
         self.extra_vars.push(VarDeclarator {
             span: DUMMY_SP,
-            name: Pat::Ident(new_class_name.clone().into()),
+            name: new_class_name.clone().into(),
             init: None,
             definite: false,
         });
@@ -695,7 +747,7 @@ impl Decorator202203 {
                 span: DUMMY_SP,
                 callee: init_class.as_callee(),
                 args: vec![],
-                type_args: Default::default(),
+                ..Default::default()
             }
             .into_stmt();
 
@@ -704,6 +756,7 @@ impl Decorator202203 {
                 body: BlockStmt {
                     span: DUMMY_SP,
                     stmts: vec![call_stmt],
+                    ..Default::default()
                 },
             }));
         }
@@ -711,289 +764,280 @@ impl Decorator202203 {
         new_class_name
     }
 
-    fn handle_class_decl(&mut self, c: &mut ClassDecl) -> Option<Stmt> {
+    fn handle_class_decl(&mut self, c: &mut ClassDecl) -> Stmt {
         let old_state = take(&mut self.state);
 
-        if !c.class.decorators.is_empty() {
-            let decorators = self.preserve_side_effect_of_decorators(c.class.decorators.take());
+        let decorators = self.preserve_side_effect_of_decorators(c.class.decorators.take());
 
-            let init_class = private_ident!("_initClass");
+        let init_class = private_ident!("_initClass");
 
-            self.extra_vars.push(VarDeclarator {
-                span: DUMMY_SP,
-                name: Pat::Ident(init_class.clone().into()),
-                init: None,
-                definite: false,
-            });
+        self.extra_vars.push(VarDeclarator {
+            span: DUMMY_SP,
+            name: init_class.clone().into(),
+            init: None,
+            definite: false,
+        });
 
-            let preserved_class_name = c.ident.clone().private();
-            let new_class_name = private_ident!(format!("_{}", c.ident.sym));
+        let preserved_class_name = c.ident.clone().into_private();
+        let new_class_name = private_ident!(format!("_{}", c.ident.sym));
 
-            self.extra_lets.push(VarDeclarator {
-                span: DUMMY_SP,
-                name: Pat::Ident(new_class_name.clone().into()),
-                init: None,
-                definite: false,
-            });
+        self.extra_lets.push(VarDeclarator {
+            span: DUMMY_SP,
+            name: new_class_name.clone().into(),
+            init: None,
+            definite: false,
+        });
 
-            self.rename_map
-                .insert(c.ident.to_id(), new_class_name.to_id());
+        self.rename_map
+            .insert(c.ident.to_id(), new_class_name.to_id());
 
-            self.state
-                .class_lhs
-                .push(Some(new_class_name.clone().into()));
-            self.state.class_lhs.push(Some(init_class.clone().into()));
+        self.state
+            .class_lhs
+            .push(Some(new_class_name.clone().into()));
+        self.state.class_lhs.push(Some(init_class.clone().into()));
 
-            self.state.class_decorators.extend(decorators);
-            self.handle_super_class(&mut c.class);
+        self.state.class_decorators.extend(decorators);
+        self.handle_super_class(&mut c.class);
 
-            let mut body = c.class.body.take();
+        let mut body = c.class.body.take();
 
-            let has_static_member = body.iter().any(|m| match m {
-                ClassMember::Method(m) => m.is_static,
-                ClassMember::PrivateMethod(m) => m.is_static,
-                ClassMember::ClassProp(ClassProp { is_static, .. })
-                | ClassMember::PrivateProp(PrivateProp { is_static, .. }) => *is_static,
-                ClassMember::StaticBlock(_) => true,
-                _ => false,
-            });
+        let has_static_member = body.iter().any(|m| match m {
+            ClassMember::Method(m) => m.is_static,
+            ClassMember::PrivateMethod(m) => m.is_static,
+            ClassMember::AutoAccessor(m) => m.is_static,
+            ClassMember::ClassProp(ClassProp { is_static, .. })
+            | ClassMember::PrivateProp(PrivateProp { is_static, .. }) => *is_static,
+            ClassMember::StaticBlock(_) => true,
+            _ => false,
+        });
 
-            if has_static_member {
-                let mut last_static_block = None;
+        if has_static_member {
+            let mut last_static_block = None;
 
-                self.process_decorators_of_class_members(&mut body);
+            self.process_decorators_of_class_members(&mut body);
 
-                // Move static blocks into property initializers
-                for m in body.iter_mut() {
-                    match m {
-                        ClassMember::ClassProp(ClassProp { value, .. })
-                        | ClassMember::PrivateProp(PrivateProp { value, .. }) => {
-                            if let Some(value) = value {
-                                if let Some(last_static_block) = last_static_block.take() {
-                                    **value = Expr::Seq(SeqExpr {
-                                        span: DUMMY_SP,
-                                        exprs: vec![
-                                            Box::new(Expr::Call(CallExpr {
-                                                span: DUMMY_SP,
-                                                callee: ArrowExpr {
-                                                    span: DUMMY_SP,
-                                                    params: vec![],
-                                                    body: Box::new(BlockStmtOrExpr::BlockStmt(
-                                                        BlockStmt {
-                                                            span: DUMMY_SP,
-                                                            stmts: last_static_block,
-                                                        },
-                                                    )),
-                                                    is_async: false,
-                                                    is_generator: false,
-                                                    type_params: Default::default(),
-                                                    return_type: Default::default(),
-                                                }
-                                                .as_callee(),
-                                                args: vec![],
-                                                type_args: Default::default(),
-                                            })),
-                                            value.take(),
-                                        ],
-                                    })
-                                }
-                            }
-                        }
-                        ClassMember::StaticBlock(s) => match &mut last_static_block {
-                            None => {
-                                last_static_block = Some(s.body.stmts.take());
-                            }
-                            Some(v) => {
-                                v.append(&mut s.body.stmts);
-                            }
-                        },
-                        _ => {}
-                    }
-                }
-
-                // Drop static blocks
-                body.retain(|m| {
-                    !matches!(m, ClassMember::StaticBlock(..) | ClassMember::Empty(..))
-                });
-
-                for m in body.iter_mut() {
-                    match m {
-                        ClassMember::ClassProp(..) | ClassMember::PrivateProp(..) => {
-                            replace_ident(m, c.ident.to_id(), &new_class_name);
-                        }
-
-                        _ => {}
-                    }
-                }
-
-                let mut inner_class = ClassDecl {
-                    ident: c.ident.clone(),
-                    declare: Default::default(),
-                    class: Box::new(Class {
-                        span: DUMMY_SP,
-                        decorators: vec![],
-                        body,
-                        super_class: c.class.super_class.take(),
-                        is_abstract: Default::default(),
-                        type_params: Default::default(),
-                        super_type_params: Default::default(),
-                        implements: Default::default(),
-                    }),
-                };
-
-                inner_class.class.visit_mut_with(self);
-
-                for m in inner_class.class.body.iter_mut() {
-                    let mut should_move = false;
-
-                    match m {
-                        ClassMember::PrivateProp(p) => {
-                            if p.is_static {
-                                should_move = true;
-                                p.is_static = false;
-                            }
-                        }
-                        ClassMember::PrivateMethod(p) => {
-                            if p.is_static {
-                                should_move = true;
-                                p.is_static = false;
-                            }
-                        }
-                        _ => (),
-                    }
-
-                    if should_move {
-                        c.class.body.push(m.take())
-                    }
-                }
-
-                c.class.body.insert(
-                    0,
-                    ClassMember::StaticBlock(StaticBlock {
-                        span: DUMMY_SP,
-                        body: BlockStmt {
-                            span: DUMMY_SP,
-                            stmts: vec![Stmt::Decl(Decl::Class(inner_class))],
-                        },
-                    }),
-                );
-
-                replace_ident(&mut c.class, c.ident.to_id(), &preserved_class_name);
-
-                {
-                    let constructor = self.ensure_identity_constructor(&mut c.class);
-
-                    let super_call = CallExpr {
-                        span: DUMMY_SP,
-                        callee: Callee::Super(Super { span: DUMMY_SP }),
-                        args: vec![c.ident.clone().as_arg()],
-                        type_args: Default::default(),
-                    }
-                    .into();
-                    let static_call = last_static_block.map(|last| {
-                        CallExpr {
-                            span: DUMMY_SP,
-                            callee: ArrowExpr {
-                                span: DUMMY_SP,
-                                params: vec![],
-                                body: Box::new(BlockStmtOrExpr::BlockStmt(BlockStmt {
+            // Move static blocks into property initializers
+            for m in body.iter_mut() {
+                match m {
+                    ClassMember::ClassProp(ClassProp { value, .. })
+                    | ClassMember::PrivateProp(PrivateProp { value, .. }) => {
+                        if let Some(value) = value {
+                            if let Some(last_static_block) = last_static_block.take() {
+                                **value = SeqExpr {
                                     span: DUMMY_SP,
-                                    stmts: last,
-                                })),
-                                is_async: false,
-                                is_generator: false,
-                                type_params: Default::default(),
-                                return_type: Default::default(),
+                                    exprs: vec![
+                                        CallExpr {
+                                            span: DUMMY_SP,
+                                            callee: ArrowExpr {
+                                                span: DUMMY_SP,
+                                                params: vec![],
+                                                body: Box::new(BlockStmtOrExpr::BlockStmt(
+                                                    BlockStmt {
+                                                        span: DUMMY_SP,
+                                                        stmts: last_static_block,
+                                                        ..Default::default()
+                                                    },
+                                                )),
+                                                is_async: false,
+                                                is_generator: false,
+                                                ..Default::default()
+                                            }
+                                            .as_callee(),
+                                            args: vec![],
+                                            ..Default::default()
+                                        }
+                                        .into(),
+                                        value.take(),
+                                    ],
+                                }
+                                .into()
                             }
-                            .as_callee(),
-                            args: vec![],
-                            type_args: Default::default(),
                         }
-                        .into()
-                    });
-
-                    let init_class_call = CallExpr {
-                        span: DUMMY_SP,
-                        callee: init_class.as_callee(),
-                        args: Vec::new(),
-                        type_args: Default::default(),
                     }
-                    .into();
-
-                    constructor.body.as_mut().unwrap().stmts.insert(
-                        0,
-                        SeqExpr {
-                            span: DUMMY_SP,
-                            exprs: once(super_call)
-                                .chain(static_call)
-                                .chain(once(init_class_call))
-                                .collect(),
+                    ClassMember::StaticBlock(s) => match &mut last_static_block {
+                        None => {
+                            last_static_block = Some(s.body.stmts.take());
                         }
-                        .into_stmt(),
-                    );
+                        Some(v) => {
+                            v.append(&mut s.body.stmts);
+                        }
+                    },
+                    _ => {}
                 }
+            }
 
-                let class = Box::new(Class {
+            // Drop static blocks
+            body.retain(|m| !matches!(m, ClassMember::StaticBlock(..) | ClassMember::Empty(..)));
+
+            for m in body.iter_mut() {
+                match m {
+                    ClassMember::ClassProp(..)
+                    | ClassMember::PrivateProp(..)
+                    | ClassMember::AutoAccessor(..) => {
+                        replace_ident(m, c.ident.to_id(), &new_class_name);
+                    }
+
+                    _ => {}
+                }
+            }
+
+            let mut inner_class = ClassDecl {
+                ident: c.ident.clone(),
+                declare: Default::default(),
+                class: Box::new(Class {
                     span: DUMMY_SP,
-                    decorators: Vec::new(),
-                    body: c.class.body.take(),
-                    super_class: Some(Box::new(helper_expr!(identity))),
-                    is_abstract: Default::default(),
-                    type_params: Default::default(),
-                    super_type_params: Default::default(),
-                    implements: Default::default(),
-                });
+                    decorators: vec![],
+                    body,
+                    super_class: c.class.super_class.take(),
+                    ..Default::default()
+                }),
+            };
 
-                self.state = old_state;
+            inner_class.class.visit_mut_with(self);
 
-                return Some(
-                    NewExpr {
-                        span: DUMMY_SP,
-                        callee: ClassExpr { ident: None, class }.into(),
-                        args: Some(vec![]),
-                        type_args: Default::default(),
+            for m in inner_class.class.body.iter_mut() {
+                let mut should_move = false;
+
+                match m {
+                    ClassMember::PrivateProp(p) => {
+                        if p.is_static {
+                            should_move = true;
+                            p.is_static = false;
+                        }
                     }
-                    .into_stmt(),
-                );
-            } else {
-                for m in body.iter_mut() {
-                    if let ClassMember::Constructor(..) = m {
-                        c.class.body.push(m.take());
+                    ClassMember::PrivateMethod(p) => {
+                        if p.is_static {
+                            should_move = true;
+                            p.is_static = false;
+                        }
                     }
+                    ClassMember::AutoAccessor(p) => {
+                        if p.is_static {
+                            should_move = true;
+                            p.is_static = false;
+                        }
+                    }
+                    _ => (),
                 }
 
-                body.visit_mut_with(self);
+                if should_move {
+                    c.class.body.push(m.take())
+                }
+            }
 
-                c.visit_mut_with(self);
-
-                c.ident = preserved_class_name.clone();
-                replace_ident(&mut c.class, c.ident.to_id(), &preserved_class_name);
-
-                c.class.body.extend(body);
-
-                c.class.body.push(ClassMember::StaticBlock(StaticBlock {
+            c.class.body.insert(
+                0,
+                ClassMember::StaticBlock(StaticBlock {
                     span: DUMMY_SP,
                     body: BlockStmt {
                         span: DUMMY_SP,
-                        stmts: vec![CallExpr {
-                            span: DUMMY_SP,
-                            callee: init_class.as_callee(),
-                            args: vec![],
-                            type_args: Default::default(),
-                        }
-                        .into_stmt()],
+                        stmts: vec![Stmt::Decl(Decl::Class(inner_class))],
+                        ..Default::default()
                     },
-                }));
+                }),
+            );
 
-                self.state = old_state;
+            replace_ident(&mut c.class, c.ident.to_id(), &preserved_class_name);
 
-                return Some(Stmt::Decl(Decl::Class(c.take())));
+            {
+                let constructor = self.ensure_identity_constructor(&mut c.class);
+
+                let super_call = CallExpr {
+                    span: DUMMY_SP,
+                    callee: Callee::Super(Super { span: DUMMY_SP }),
+                    args: vec![c.ident.clone().as_arg()],
+                    ..Default::default()
+                }
+                .into();
+                let static_call = last_static_block.map(|last| {
+                    CallExpr {
+                        span: DUMMY_SP,
+                        callee: ArrowExpr {
+                            span: DUMMY_SP,
+                            params: vec![],
+                            body: Box::new(BlockStmtOrExpr::BlockStmt(BlockStmt {
+                                span: DUMMY_SP,
+                                stmts: last,
+                                ..Default::default()
+                            })),
+                            is_async: false,
+                            is_generator: false,
+                            ..Default::default()
+                        }
+                        .as_callee(),
+                        args: vec![],
+                        ..Default::default()
+                    }
+                    .into()
+                });
+
+                let init_class_call = CallExpr {
+                    span: DUMMY_SP,
+                    callee: init_class.as_callee(),
+                    args: Vec::new(),
+                    ..Default::default()
+                }
+                .into();
+
+                constructor.body.as_mut().unwrap().stmts.insert(
+                    0,
+                    SeqExpr {
+                        span: DUMMY_SP,
+                        exprs: once(super_call)
+                            .chain(static_call)
+                            .chain(once(init_class_call))
+                            .collect(),
+                    }
+                    .into_stmt(),
+                );
             }
+
+            let class = Box::new(Class {
+                span: DUMMY_SP,
+                decorators: Vec::new(),
+                body: c.class.body.take(),
+                super_class: Some(Box::new(helper_expr!(identity))),
+                ..Default::default()
+            });
+
+            self.state = old_state;
+
+            return NewExpr {
+                span: DUMMY_SP,
+                callee: ClassExpr { ident: None, class }.into(),
+                args: Some(vec![]),
+                ..Default::default()
+            }
+            .into_stmt();
         }
 
+        for m in body.iter_mut() {
+            if let ClassMember::Constructor(..) = m {
+                c.class.body.push(m.take());
+            }
+        }
+        body.visit_mut_with(self);
+        c.visit_mut_with(self);
+        c.ident = preserved_class_name.clone();
+        replace_ident(&mut c.class, c.ident.to_id(), &preserved_class_name);
+        c.class.body.extend(body);
+        c.class.body.push(ClassMember::StaticBlock(StaticBlock {
+            span: DUMMY_SP,
+            body: BlockStmt {
+                span: DUMMY_SP,
+                stmts: vec![CallExpr {
+                    span: DUMMY_SP,
+                    callee: init_class.as_callee(),
+                    args: vec![],
+                    ..Default::default()
+                }
+                .into_stmt()],
+                ..Default::default()
+            },
+        }));
         self.state = old_state;
 
-        None
+        Stmt::Decl(Decl::Class(c.take()))
     }
 
     fn process_decorators(&mut self, decorators: &mut [Decorator]) {
@@ -1012,17 +1056,20 @@ impl Decorator202203 {
                 let ident = private_ident!("_computedKey");
                 self.extra_vars.push(VarDeclarator {
                     span: DUMMY_SP,
-                    name: Pat::Ident(ident.clone().into()),
+                    name: ident.clone().into(),
                     init: None,
                     definite: false,
                 });
 
-                self.pre_class_inits.push(Box::new(Expr::Assign(AssignExpr {
-                    span: DUMMY_SP,
-                    op: op!("="),
-                    left: PatOrExpr::Pat(ident.clone().into()),
-                    right: Box::new(prop_name_to_expr_value(name.take())),
-                })));
+                self.pre_class_inits.push(
+                    AssignExpr {
+                        span: DUMMY_SP,
+                        op: op!("="),
+                        left: ident.clone().into(),
+                        right: Box::new(prop_name_to_expr_value(name.take())),
+                    }
+                    .into(),
+                );
                 *name = PropName::Computed(ComputedPropName {
                     span: DUMMY_SP,
                     expr: ident.into(),
@@ -1034,14 +1081,14 @@ impl Decorator202203 {
     fn process_decorators_of_class_members(&mut self, members: &mut [ClassMember]) {
         for cm in members {
             match cm {
-                ClassMember::Method(m) => {
+                ClassMember::Method(m) if m.function.body.is_some() => {
                     self.process_decorators(&mut m.function.decorators);
                     self.process_prop_name(&mut m.key);
                 }
-                ClassMember::PrivateMethod(m) => {
+                ClassMember::PrivateMethod(m) if m.function.body.is_some() => {
                     self.process_decorators(&mut m.function.decorators);
                 }
-                ClassMember::ClassProp(m) => {
+                ClassMember::ClassProp(m) if !m.declare => {
                     self.process_decorators(&mut m.decorators);
                     self.process_prop_name(&mut m.key);
                 }
@@ -1060,7 +1107,7 @@ impl Decorator202203 {
     }
 }
 
-impl VisitMut for Decorator202203 {
+impl VisitMut for Decorator2022_03 {
     noop_visit_mut_type!();
 
     fn visit_mut_class(&mut self, n: &mut Class) {
@@ -1074,12 +1121,13 @@ impl VisitMut for Decorator202203 {
 
                 inject_after_super(
                     c,
-                    vec![Box::new(Expr::Call(CallExpr {
+                    vec![CallExpr {
                         span: DUMMY_SP,
                         callee: init_proto.as_callee(),
                         args: vec![ThisExpr { span: DUMMY_SP }.as_arg()],
-                        type_args: Default::default(),
-                    }))],
+                        ..Default::default()
+                    }
+                    .into()],
                 )
             }
         }
@@ -1094,6 +1142,7 @@ impl VisitMut for Decorator202203 {
                     body: BlockStmt {
                         span: DUMMY_SP,
                         stmts: self.state.extra_stmts.take(),
+                        ..Default::default()
                     },
                 }),
             );
@@ -1116,11 +1165,11 @@ impl VisitMut for Decorator202203 {
             let decorators = self.preserve_side_effect_of_decorators(p.function.decorators.take());
             let dec = merge_decorators(decorators);
 
-            let init = private_ident!(format!("_call_{}", p.key.id.sym));
+            let init = private_ident!(format!("_call_{}", p.key.name));
 
             self.extra_vars.push(VarDeclarator {
                 span: p.span,
-                name: Pat::Ident(init.clone().into()),
+                name: init.clone().into(),
                 init: None,
                 definite: false,
             });
@@ -1153,7 +1202,7 @@ impl VisitMut for Decorator202203 {
                             } + if p.is_static { STATIC } else { 0 })
                             .as_arg(),
                         ),
-                        Some(p.key.id.sym.clone().as_arg()),
+                        Some(p.key.name.clone().as_arg()),
                         Some(caller.as_arg()),
                     ],
                 }
@@ -1175,7 +1224,7 @@ impl VisitMut for Decorator202203 {
                 MethodKind::Method => {
                     let call_stmt = Stmt::Return(ReturnStmt {
                         span: DUMMY_SP,
-                        arg: Some(Box::new(Expr::Ident(init))),
+                        arg: Some(init.into()),
                     });
 
                     p.kind = MethodKind::Getter;
@@ -1183,41 +1232,51 @@ impl VisitMut for Decorator202203 {
                     p.function.body = Some(BlockStmt {
                         span: DUMMY_SP,
                         stmts: vec![call_stmt],
+                        ..Default::default()
                     });
                 }
                 MethodKind::Getter => {
                     let call_stmt = Stmt::Return(ReturnStmt {
                         span: DUMMY_SP,
-                        arg: Some(Box::new(Expr::Call(CallExpr {
-                            span: DUMMY_SP,
-                            callee: init.as_callee(),
-                            args: vec![ThisExpr { span: DUMMY_SP }.as_arg()],
-                            type_args: Default::default(),
-                        }))),
+                        arg: Some(
+                            CallExpr {
+                                span: DUMMY_SP,
+                                callee: init.as_callee(),
+                                args: vec![ThisExpr { span: DUMMY_SP }.as_arg()],
+                                ..Default::default()
+                            }
+                            .into(),
+                        ),
                     });
 
                     p.function.body = Some(BlockStmt {
                         span: DUMMY_SP,
                         stmts: vec![call_stmt],
+                        ..Default::default()
                     });
                 }
                 MethodKind::Setter => {
                     let call_stmt = Stmt::Return(ReturnStmt {
                         span: DUMMY_SP,
-                        arg: Some(Box::new(Expr::Call(CallExpr {
-                            span: DUMMY_SP,
-                            callee: init.as_callee(),
-                            args: vec![
-                                ThisExpr { span: DUMMY_SP }.as_arg(),
-                                p.function.params[0].pat.clone().expect_ident().id.as_arg(),
-                            ],
-                            type_args: Default::default(),
-                        }))),
+                        arg: Some(
+                            CallExpr {
+                                span: DUMMY_SP,
+                                callee: init.as_callee(),
+                                args: vec![
+                                    ThisExpr { span: DUMMY_SP }.as_arg(),
+                                    Ident::from(p.function.params[0].pat.as_ident().unwrap())
+                                        .as_arg(),
+                                ],
+                                ..Default::default()
+                            }
+                            .into(),
+                        ),
                     });
 
                     p.function.body = Some(BlockStmt {
                         span: DUMMY_SP,
                         stmts: vec![call_stmt],
+                        ..Default::default()
                     });
                 }
             }
@@ -1232,6 +1291,8 @@ impl VisitMut for Decorator202203 {
         for mut m in members.take() {
             match m {
                 ClassMember::AutoAccessor(mut accessor) => {
+                    accessor.value.visit_mut_with(self);
+
                     let name;
                     let init;
                     let field_name_like: JsWord;
@@ -1239,17 +1300,20 @@ impl VisitMut for Decorator202203 {
                         span: DUMMY_SP,
                         key: match &mut accessor.key {
                             Key::Private(k) => {
-                                name = Box::new(Expr::Lit(Lit::Str(Str {
+                                name = Lit::Str(Str {
                                     span: DUMMY_SP,
-                                    value: k.id.sym.clone(),
+                                    value: k.name.clone(),
                                     raw: None,
-                                })));
-                                init = private_ident!(format!("_init_{}", k.id.sym));
-                                field_name_like = format!("__{}", k.id.sym).into();
+                                })
+                                .into();
+                                init = private_ident!(format!("_init_{}", k.name));
+                                field_name_like = format!("__{}", k.name).into();
 
+                                self.state.private_id_index += 1;
                                 PrivateName {
                                     span: k.span,
-                                    id: Ident::new(format!("__{}", k.id.sym).into(), k.id.span),
+                                    name: format!("__{}_{}", k.name, self.state.private_id_index)
+                                        .into(),
                                 }
                             }
                             Key::Public(k) => {
@@ -1258,12 +1322,15 @@ impl VisitMut for Decorator202203 {
                                     .replacen("init", "private", 1)
                                     .into();
 
+                                self.state.private_id_index += 1;
+
                                 PrivateName {
-                                    span: init.span.with_ctxt(SyntaxContext::empty()),
-                                    id: Ident::new(
-                                        field_name_like.clone(),
-                                        init.span.with_ctxt(SyntaxContext::empty()),
-                                    ),
+                                    span: init.span,
+                                    name: format!(
+                                        "{field_name_like}_{}",
+                                        self.state.private_id_index
+                                    )
+                                    .into(),
                                 }
                             }
                         },
@@ -1282,22 +1349,26 @@ impl VisitMut for Decorator202203 {
                                         .get_or_insert_with(|| private_ident!("_initProto"))
                                         .clone();
 
-                                    Some(Box::new(Expr::Call(CallExpr {
-                                        span: DUMMY_SP,
-                                        callee: init_proto.clone().as_callee(),
-                                        args: vec![ThisExpr { span: DUMMY_SP }.as_arg()],
-                                        type_args: Default::default(),
-                                    })))
+                                    Some(
+                                        CallExpr {
+                                            span: DUMMY_SP,
+                                            callee: init_proto.clone().as_callee(),
+                                            args: vec![ThisExpr { span: DUMMY_SP }.as_arg()],
+                                            ..Default::default()
+                                        }
+                                        .into(),
+                                    )
                                 };
 
-                            let init_call = Box::new(Expr::Call(CallExpr {
+                            let init_call = CallExpr {
                                 span: DUMMY_SP,
                                 callee: init.clone().as_callee(),
                                 args: once(ThisExpr { span: DUMMY_SP }.as_arg())
                                     .chain(accessor.value.take().map(|v| v.as_arg()))
                                     .collect(),
-                                type_args: Default::default(),
-                            }));
+                                ..Default::default()
+                            }
+                            .into();
 
                             Some(Expr::from_exprs(
                                 init_proto.into_iter().chain(once(init_call)).collect(),
@@ -1311,6 +1382,7 @@ impl VisitMut for Decorator202203 {
                         is_override: false,
                         readonly: false,
                         definite: false,
+                        ctxt: Default::default(),
                     };
 
                     let mut getter_function = Box::new(Function {
@@ -1327,11 +1399,11 @@ impl VisitMut for Decorator202203 {
                                     prop: MemberProp::PrivateName(private_field.key.clone()),
                                 }))),
                             })],
+                            ..Default::default()
                         }),
                         is_generator: false,
                         is_async: false,
-                        type_params: None,
-                        return_type: None,
+                        ..Default::default()
                     });
                     let mut setter_function = {
                         let param = private_ident!("_v");
@@ -1351,23 +1423,22 @@ impl VisitMut for Decorator202203 {
                                     expr: Box::new(Expr::Assign(AssignExpr {
                                         span: DUMMY_SP,
                                         op: op!("="),
-                                        left: swc_ecma_ast::PatOrExpr::Expr(Box::new(
-                                            Expr::Member(MemberExpr {
-                                                span: DUMMY_SP,
-                                                obj: ThisExpr { span: DUMMY_SP }.into(),
-                                                prop: MemberProp::PrivateName(
-                                                    private_field.key.clone(),
-                                                ),
-                                            }),
-                                        )),
+                                        left: MemberExpr {
+                                            span: DUMMY_SP,
+                                            obj: ThisExpr { span: DUMMY_SP }.into(),
+                                            prop: MemberProp::PrivateName(
+                                                private_field.key.clone(),
+                                            ),
+                                        }
+                                        .into(),
                                         right: param.clone().into(),
                                     })),
                                 })],
+                                ..Default::default()
                             }),
                             is_generator: false,
                             is_async: false,
-                            type_params: None,
-                            return_type: None,
+                            ..Default::default()
                         })
                     };
 
@@ -1378,7 +1449,7 @@ impl VisitMut for Decorator202203 {
 
                         self.extra_vars.push(VarDeclarator {
                             span: accessor.span,
-                            name: Pat::Ident(init.clone().into()),
+                            name: init.clone().into(),
                             init: None,
                             definite: false,
                         });
@@ -1422,42 +1493,43 @@ impl VisitMut for Decorator202203 {
 
                                         self.extra_vars.push(VarDeclarator {
                                             span: DUMMY_SP,
-                                            name: Pat::Ident(getter_var.clone().unwrap().into()),
+                                            name: getter_var.clone().unwrap().into(),
                                             init: None,
                                             definite: false,
                                         });
                                         self.extra_vars.push(VarDeclarator {
                                             span: DUMMY_SP,
-                                            name: Pat::Ident(setter_var.clone().unwrap().into()),
+                                            name: setter_var.clone().unwrap().into(),
                                             init: None,
                                             definite: false,
                                         });
 
                                         getter_function = Box::new(Function {
                                             params: vec![],
-                                            decorators: Default::default(),
                                             span: DUMMY_SP,
                                             body: Some(BlockStmt {
                                                 span: DUMMY_SP,
                                                 stmts: vec![Stmt::Return(ReturnStmt {
                                                     span: DUMMY_SP,
-                                                    arg: Some(Box::new(Expr::Call(CallExpr {
-                                                        span: DUMMY_SP,
-                                                        callee: getter_var
-                                                            .clone()
-                                                            .unwrap()
-                                                            .as_callee(),
-                                                        args: vec![
-                                                            ThisExpr { span: DUMMY_SP }.as_arg()
-                                                        ],
-                                                        type_args: Default::default(),
-                                                    }))),
+                                                    arg: Some(
+                                                        CallExpr {
+                                                            span: DUMMY_SP,
+                                                            callee: getter_var
+                                                                .clone()
+                                                                .unwrap()
+                                                                .as_callee(),
+                                                            args: vec![ThisExpr { span: DUMMY_SP }
+                                                                .as_arg()],
+                                                            ..Default::default()
+                                                        }
+                                                        .into(),
+                                                    ),
                                                 })],
+                                                ..Default::default()
                                             }),
                                             is_generator: false,
                                             is_async: false,
-                                            type_params: Default::default(),
-                                            return_type: Default::default(),
+                                            ..Default::default()
                                         });
 
                                         let param = private_ident!("_v");
@@ -1474,7 +1546,7 @@ impl VisitMut for Decorator202203 {
                                                 span: DUMMY_SP,
                                                 stmts: vec![Stmt::Expr(ExprStmt {
                                                     span: DUMMY_SP,
-                                                    expr: Box::new(Expr::Call(CallExpr {
+                                                    expr: CallExpr {
                                                         span: DUMMY_SP,
                                                         callee: setter_var
                                                             .clone()
@@ -1484,14 +1556,15 @@ impl VisitMut for Decorator202203 {
                                                             ThisExpr { span: DUMMY_SP }.as_arg(),
                                                             param.as_arg(),
                                                         ],
-                                                        type_args: Default::default(),
-                                                    })),
+                                                        ..Default::default()
+                                                    }
+                                                    .into(),
                                                 })],
+                                                ..Default::default()
                                             }),
                                             is_generator: false,
                                             is_async: false,
-                                            type_params: Default::default(),
-                                            return_type: Default::default(),
+                                            ..Default::default()
                                         });
 
                                         data
@@ -1611,7 +1684,9 @@ impl VisitMut for Decorator202203 {
 
         for mut m in new.take() {
             match &mut m {
-                ClassMember::Method(..) | ClassMember::PrivateMethod(..) => {}
+                ClassMember::Method(..)
+                | ClassMember::PrivateMethod(..)
+                | ClassMember::AutoAccessor(..) => {}
 
                 _ => {
                     if !m.span().is_dummy() {
@@ -1627,6 +1702,11 @@ impl VisitMut for Decorator202203 {
     }
 
     fn visit_mut_class_method(&mut self, n: &mut ClassMethod) {
+        // method without body is TypeScript's method declaration.
+        if n.function.body.is_none() {
+            return;
+        }
+
         n.visit_mut_children_with(self);
 
         if n.function.decorators.is_empty() {
@@ -1677,6 +1757,10 @@ impl VisitMut for Decorator202203 {
     }
 
     fn visit_mut_class_prop(&mut self, p: &mut ClassProp) {
+        if p.declare {
+            return;
+        }
+
         p.visit_mut_children_with(self);
 
         if p.decorators.is_empty() {
@@ -1690,19 +1774,23 @@ impl VisitMut for Decorator202203 {
 
         self.extra_vars.push(VarDeclarator {
             span: p.span,
-            name: Pat::Ident(init.clone().into()),
+            name: init.clone().into(),
             init: None,
             definite: false,
         });
 
-        p.value = Some(Box::new(Expr::Call(CallExpr {
-            span: DUMMY_SP,
-            callee: init.clone().as_callee(),
-            args: once(ThisExpr { span: DUMMY_SP }.as_arg())
-                .chain(p.value.take().map(|v| v.as_arg()))
-                .collect(),
-            type_args: Default::default(),
-        })));
+        p.value = Some(
+            CallExpr {
+                span: DUMMY_SP,
+                callee: init.clone().as_callee(),
+                args: once(ThisExpr { span: DUMMY_SP }.as_arg())
+                    .chain(p.value.take().map(|v| v.as_arg()))
+                    .collect(),
+
+                ..Default::default()
+            }
+            .into(),
+        );
 
         let initialize_init = {
             Some(
@@ -1740,10 +1828,11 @@ impl VisitMut for Decorator202203 {
                 let new = self.handle_class_expr(&mut c.class, c.ident.as_ref());
                 c.visit_mut_with(self);
 
-                *e = Expr::Seq(SeqExpr {
+                *e = SeqExpr {
                     span: DUMMY_SP,
-                    exprs: vec![Box::new(e.take()), Box::new(Expr::Ident(new))],
-                });
+                    exprs: vec![Box::new(e.take()), new.into()],
+                }
+                .into();
 
                 self.state = state;
 
@@ -1751,7 +1840,7 @@ impl VisitMut for Decorator202203 {
             }
         }
 
-        e.visit_mut_children_with(self);
+        maybe_grow_default(|| e.visit_mut_children_with(self));
     }
 
     fn visit_mut_module_item(&mut self, s: &mut ModuleItem) {
@@ -1759,24 +1848,19 @@ impl VisitMut for Decorator202203 {
             ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
                 span,
                 decl: Decl::Class(c),
-            })) => {
+            })) if !c.class.decorators.is_empty() => {
                 let ident = c.ident.clone();
                 let span = *span;
                 let new_stmt = self.handle_class_decl(c);
 
-                if let Some(new_stmt) = new_stmt {
-                    *s = ModuleItem::Stmt(new_stmt);
-                    self.extra_exports
-                        .push(ExportSpecifier::Named(ExportNamedSpecifier {
-                            span,
-                            orig: ModuleExportName::Ident(ident),
-                            exported: None,
-                            is_type_only: false,
-                        }));
-                    return;
-                }
-
-                s.visit_mut_children_with(self);
+                *s = ModuleItem::Stmt(new_stmt);
+                self.extra_exports
+                    .push(ExportSpecifier::Named(ExportNamedSpecifier {
+                        span,
+                        orig: ModuleExportName::Ident(ident),
+                        exported: None,
+                        is_type_only: false,
+                    }));
             }
             _ => {
                 s.visit_mut_children_with(self);
@@ -1785,15 +1869,18 @@ impl VisitMut for Decorator202203 {
     }
 
     fn visit_mut_module_items(&mut self, n: &mut Vec<ModuleItem>) {
-        let old_extra_lets = self.extra_lets.take();
+        let extra_vars = self.extra_vars.take();
+        let extra_lets = self.extra_lets.take();
+        let pre_class_inits = self.pre_class_inits.take();
+        let extra_exports = self.extra_exports.take();
 
-        let mut new = Vec::with_capacity(n.len());
+        let mut insert_builder = InsertPassBuilder::new();
 
-        for mut n in n.take() {
+        for (index, n) in n.iter_mut().enumerate() {
             if let ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultDecl(ExportDefaultDecl {
                 span,
                 decl: DefaultDecl::Class(c),
-            })) = &mut n
+            })) = n
             {
                 if !c.class.decorators.is_empty() {
                     let state = self.state.clone();
@@ -1803,18 +1890,21 @@ impl VisitMut for Decorator202203 {
                     c.visit_mut_children_with(self);
 
                     if !self.extra_lets.is_empty() {
-                        new.push(
+                        insert_builder.push_back(
+                            index,
                             Stmt::Decl(Decl::Var(Box::new(VarDecl {
                                 span: DUMMY_SP,
                                 kind: VarDeclKind::Let,
                                 decls: self.extra_lets.take(),
                                 declare: false,
+                                ..Default::default()
                             })))
                             .into(),
                         )
                     }
                     if !self.pre_class_inits.is_empty() {
-                        new.push(
+                        insert_builder.push_back(
+                            index,
                             Stmt::Expr(ExprStmt {
                                 span: DUMMY_SP,
                                 expr: Expr::from_exprs(self.pre_class_inits.take()),
@@ -1837,13 +1927,11 @@ impl VisitMut for Decorator202203 {
                         })
                     };
 
-                    new.push(ModuleItem::Stmt(stmt));
-                    new.push(ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(
-                        ExportDefaultExpr {
-                            span: *span,
-                            expr: Box::new(Expr::Ident(new_class_name)),
-                        },
-                    )));
+                    insert_builder.push_back(index, ModuleItem::Stmt(stmt));
+                    *n = ModuleItem::ModuleDecl(ModuleDecl::ExportDefaultExpr(ExportDefaultExpr {
+                        span: *span,
+                        expr: new_class_name.into(),
+                    }));
 
                     self.state = state;
 
@@ -1854,18 +1942,21 @@ impl VisitMut for Decorator202203 {
             n.visit_mut_with(self);
 
             if !self.extra_lets.is_empty() {
-                new.push(
-                    Stmt::Decl(Decl::Var(Box::new(VarDecl {
+                insert_builder.push_back(
+                    index,
+                    VarDecl {
                         span: DUMMY_SP,
                         kind: VarDeclKind::Let,
                         decls: self.extra_lets.take(),
                         declare: false,
-                    })))
+                        ..Default::default()
+                    }
                     .into(),
                 )
             }
             if !self.pre_class_inits.is_empty() {
-                new.push(
+                insert_builder.push_back(
+                    index,
                     Stmt::Expr(ExprStmt {
                         span: DUMMY_SP,
                         expr: Expr::from_exprs(self.pre_class_inits.take()),
@@ -1873,42 +1964,52 @@ impl VisitMut for Decorator202203 {
                     .into(),
                 )
             }
-
-            new.push(n.take());
         }
 
         if !self.extra_vars.is_empty() {
-            prepend_stmt(
-                &mut new,
+            let insert_pos = n
+                .iter()
+                .position(|module_item| match module_item {
+                    ModuleItem::Stmt(stmt) => !is_maybe_branch_directive(stmt),
+                    ModuleItem::ModuleDecl(_) => true,
+                })
+                .unwrap_or(0);
+            insert_builder.push_front(
+                insert_pos,
                 VarDecl {
                     span: DUMMY_SP,
                     kind: VarDeclKind::Var,
                     decls: self.extra_vars.take(),
                     declare: false,
+                    ..Default::default()
                 }
                 .into(),
             );
         }
 
         if !self.extra_exports.is_empty() {
-            new.push(ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(
-                NamedExport {
+            insert_builder.push_back(
+                n.len() + 1,
+                ModuleItem::ModuleDecl(ModuleDecl::ExportNamed(NamedExport {
                     span: DUMMY_SP,
                     specifiers: self.extra_exports.take(),
                     src: None,
                     type_only: false,
                     with: None,
-                },
-            )));
+                })),
+            );
         }
 
-        *n = new;
+        *n = insert_builder.build(n.take());
 
         if !self.rename_map.is_empty() {
             n.visit_mut_with(&mut IdentRenamer::new(&self.rename_map));
         }
 
-        self.extra_lets = old_extra_lets;
+        self.extra_vars = extra_vars;
+        self.extra_lets = extra_lets;
+        self.pre_class_inits = pre_class_inits;
+        self.extra_exports = extra_exports;
     }
 
     fn visit_mut_script(&mut self, n: &mut Script) {
@@ -1924,6 +2025,7 @@ impl VisitMut for Decorator202203 {
                     kind: VarDeclKind::Let,
                     decls: self.extra_lets.take(),
                     declare: false,
+                    ..Default::default()
                 }))))
             }
             if !self.pre_class_inits.is_empty() {
@@ -1943,6 +2045,7 @@ impl VisitMut for Decorator202203 {
                     kind: VarDeclKind::Var,
                     decls: self.extra_vars.take(),
                     declare: false,
+                    ..Default::default()
                 }
                 .into(),
             );
@@ -1966,30 +2069,33 @@ impl VisitMut for Decorator202203 {
         let decorators = self.preserve_side_effect_of_decorators(p.decorators.take());
         let dec = merge_decorators(decorators);
 
-        let init = private_ident!(format!("_init_{}", p.key.id.sym));
+        let init = private_ident!(format!("_init_{}", p.key.name));
 
         self.extra_vars.push(VarDeclarator {
             span: p.span,
-            name: Pat::Ident(init.clone().into()),
+            name: init.clone().into(),
             init: None,
             definite: false,
         });
 
-        p.value = Some(Box::new(Expr::Call(CallExpr {
-            span: DUMMY_SP,
-            callee: init.clone().as_callee(),
-            args: once(ThisExpr { span: DUMMY_SP }.as_arg())
-                .chain(p.value.take().map(|v| v.as_arg()))
-                .collect(),
-            type_args: Default::default(),
-        })));
+        p.value = Some(
+            CallExpr {
+                span: DUMMY_SP,
+                callee: init.clone().as_callee(),
+                args: once(ThisExpr { span: DUMMY_SP }.as_arg())
+                    .chain(p.value.take().map(|v| v.as_arg()))
+                    .collect(),
+                ..Default::default()
+            }
+            .into(),
+        );
 
         let initialize_init = {
-            let access_expr = Box::new(Expr::Member(MemberExpr {
+            let access_expr = MemberExpr {
                 span: DUMMY_SP,
                 obj: Box::new(Expr::This(ThisExpr { span: DUMMY_SP })),
                 prop: MemberProp::PrivateName(p.key.clone()),
-            }));
+            };
 
             let getter = Box::new(Function {
                 span: DUMMY_SP,
@@ -1997,15 +2103,13 @@ impl VisitMut for Decorator202203 {
                     span: DUMMY_SP,
                     stmts: vec![Stmt::Return(ReturnStmt {
                         span: DUMMY_SP,
-                        arg: Some(access_expr.clone()),
+                        arg: Some(access_expr.clone().into()),
                     })],
+                    ..Default::default()
                 }),
                 is_async: false,
                 is_generator: false,
-                decorators: Default::default(),
-                params: Default::default(),
-                type_params: Default::default(),
-                return_type: Default::default(),
+                ..Default::default()
             });
             let settter_arg = private_ident!("value");
             let setter = Box::new(Function {
@@ -2017,10 +2121,11 @@ impl VisitMut for Decorator202203 {
                         expr: Box::new(Expr::Assign(AssignExpr {
                             span: DUMMY_SP,
                             op: op!("="),
-                            left: PatOrExpr::Expr(access_expr),
-                            right: Box::new(Expr::Ident(settter_arg.clone())),
+                            left: access_expr.into(),
+                            right: settter_arg.clone().into(),
                         })),
                     })],
+                    ..Default::default()
                 }),
                 is_async: false,
                 is_generator: false,
@@ -2028,10 +2133,9 @@ impl VisitMut for Decorator202203 {
                 params: vec![Param {
                     span: DUMMY_SP,
                     decorators: Default::default(),
-                    pat: Pat::Ident(settter_arg.into()),
+                    pat: settter_arg.into(),
                 }],
-                type_params: Default::default(),
-                return_type: Default::default(),
+                ..Default::default()
             });
 
             ArrayLit {
@@ -2043,7 +2147,7 @@ impl VisitMut for Decorator202203 {
                     } else {
                         FIELD.as_arg()
                     }),
-                    Some((&*p.key.id.sym).as_arg()),
+                    Some((&*p.key.name).as_arg()),
                     Some(
                         FnExpr {
                             ident: None,
@@ -2073,16 +2177,14 @@ impl VisitMut for Decorator202203 {
     }
 
     fn visit_mut_stmt(&mut self, s: &mut Stmt) {
-        if let Stmt::Decl(Decl::Class(c)) = s {
-            let new_stmt = self.handle_class_decl(c);
-
-            if let Some(new_stmt) = new_stmt {
-                *s = new_stmt;
-                return;
+        match s {
+            Stmt::Decl(Decl::Class(c)) if !c.class.decorators.is_empty() => {
+                *s = self.handle_class_decl(c);
+            }
+            _ => {
+                s.visit_mut_children_with(self);
             }
         }
-
-        s.visit_mut_children_with(self);
     }
 
     fn visit_mut_stmts(&mut self, n: &mut Vec<Stmt>) {
@@ -2091,46 +2193,121 @@ impl VisitMut for Decorator202203 {
         let old_extra_lets = self.extra_lets.take();
         let old_extra_vars = self.extra_vars.take();
 
-        let mut new = Vec::with_capacity(n.len());
+        let mut insert_builder = InsertPassBuilder::new();
 
-        for mut n in n.take() {
+        for (index, n) in n.iter_mut().enumerate() {
             n.visit_mut_with(self);
-            if !self.extra_lets.is_empty() {
-                new.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
-                    span: DUMMY_SP,
-                    kind: VarDeclKind::Let,
-                    decls: self.extra_lets.take(),
-                    declare: false,
-                }))))
-            }
             if !self.pre_class_inits.is_empty() {
-                new.push(Stmt::Expr(ExprStmt {
-                    span: DUMMY_SP,
-                    expr: Expr::from_exprs(self.pre_class_inits.take()),
-                }))
+                insert_builder.push_back(
+                    index,
+                    Stmt::Expr(ExprStmt {
+                        span: DUMMY_SP,
+                        expr: Expr::from_exprs(self.pre_class_inits.take()),
+                    }),
+                );
             }
-            new.push(n.take());
+            if !self.extra_lets.is_empty() {
+                insert_builder.push_back(
+                    index,
+                    Stmt::Decl(Decl::Var(Box::new(VarDecl {
+                        span: DUMMY_SP,
+                        kind: VarDeclKind::Let,
+                        decls: self.extra_lets.take(),
+                        declare: false,
+                        ..Default::default()
+                    }))),
+                );
+            }
+
+            if !self.pre_class_inits.is_empty() {
+                insert_builder.push_back(
+                    index,
+                    Stmt::Expr(ExprStmt {
+                        span: DUMMY_SP,
+                        expr: Expr::from_exprs(self.pre_class_inits.take()),
+                    }),
+                );
+            }
         }
 
         if !self.extra_vars.is_empty() {
-            prepend_stmt(
-                &mut new,
+            let insert_pos = n
+                .iter()
+                .position(|stmt| !is_maybe_branch_directive(stmt))
+                .unwrap_or(0);
+            insert_builder.push_front(
+                insert_pos,
                 VarDecl {
                     span: DUMMY_SP,
                     kind: VarDeclKind::Var,
                     decls: self.extra_vars.take(),
                     declare: false,
+                    ..Default::default()
                 }
                 .into(),
             );
         }
 
-        *n = new;
+        *n = insert_builder.build(n.take());
 
         self.extra_vars = old_extra_vars;
         self.extra_lets = old_extra_lets;
         self.pre_class_inits = old_pre_class_inits;
         self.state = old_state;
+    }
+}
+
+/// Inserts into a vector on `build()` setting the correct
+/// capacity. This is useful in scenarios where you're iterating
+/// a vector to insert and all the inserts are in the order of
+/// the iteration.
+struct InsertPassBuilder<T> {
+    inserts: VecDeque<(usize, T)>,
+}
+
+impl<T> InsertPassBuilder<T> {
+    pub fn new() -> Self {
+        Self {
+            inserts: Default::default(),
+        }
+    }
+
+    pub fn push_front(&mut self, index: usize, item: T) {
+        if cfg!(debug_assertions) {
+            if let Some(past) = self.inserts.front() {
+                debug_assert!(past.0 >= index, "{} {}", past.0, index);
+            }
+        }
+        self.inserts.push_front((index, item));
+    }
+
+    pub fn push_back(&mut self, index: usize, item: T) {
+        if cfg!(debug_assertions) {
+            if let Some(past) = self.inserts.back() {
+                debug_assert!(past.0 <= index, "{} {}", past.0, index);
+            }
+        }
+        self.inserts.push_back((index, item));
+    }
+
+    pub fn build(mut self, original: Vec<T>) -> Vec<T> {
+        let capacity = original.len() + self.inserts.len();
+        let mut new = Vec::with_capacity(capacity);
+        for (index, item) in original.into_iter().enumerate() {
+            while self
+                .inserts
+                .front()
+                .map(|(item_index, _)| *item_index == index)
+                .unwrap_or(false)
+            {
+                new.push(self.inserts.pop_front().unwrap().1);
+            }
+            new.push(item);
+        }
+        new.extend(self.inserts.into_iter().map(|v| v.1));
+
+        debug_assert!(new.len() == capacity, "len: {} / {}", new.len(), capacity);
+        new
     }
 }
 

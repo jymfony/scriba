@@ -1,10 +1,10 @@
-use crate::parser::util::ident;
+use crate::parser::util::ident_name;
 use swc_atoms::JsWord;
 use swc_common::util::take::Take;
-use swc_common::{Mark, Span, DUMMY_SP};
+use swc_common::{Mark, Span, SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::*;
 use swc_ecma_transforms_base::enable_helper;
-use swc_ecma_utils::{private_ident, quote_ident, undefined, ExprFactory};
+use swc_ecma_utils::{private_ident, quote_ident, ExprFactory};
 use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
 
 pub fn optional_import(unresolved_mark: Mark) -> impl VisitMut + Fold {
@@ -29,7 +29,11 @@ impl OptionalImport {
     ) -> Expr {
         Expr::Call(CallExpr {
             span: DUMMY_SP,
-            callee: quote_ident!(DUMMY_SP.apply_mark(unresolved_mark), "require").as_callee(),
+            callee: quote_ident!(
+                SyntaxContext::empty().apply_mark(unresolved_mark),
+                "require"
+            )
+            .as_callee(),
             args: vec![Lit::Str(Str {
                 span: src_span,
                 raw: None,
@@ -37,7 +41,7 @@ impl OptionalImport {
             })
             .as_arg()],
 
-            type_args: Default::default(),
+            ..Default::default()
         })
     }
 }
@@ -52,6 +56,7 @@ impl OptionalImport {
                     span: DUMMY_SP,
                     arg: Some(Box::new(expr)),
                 })],
+                ..Default::default()
             },
             handler: Some(CatchClause {
                 span: DUMMY_SP,
@@ -60,8 +65,9 @@ impl OptionalImport {
                     span: DUMMY_SP,
                     stmts: vec![Stmt::Return(ReturnStmt {
                         span: DUMMY_SP,
-                        arg: Some(undefined(DUMMY_SP)),
+                        arg: Some(Expr::undefined(DUMMY_SP)),
                     })],
+                    ..Default::default()
                 },
             }),
             finalizer: None,
@@ -154,17 +160,18 @@ impl VisitMut for OptionalImport {
                                             body: Some(BlockStmt {
                                                 span: DUMMY_SP,
                                                 stmts: vec![call_req],
+                                                ..Default::default()
                                             }),
                                             is_generator: false,
                                             is_async: false,
-                                            type_params: None,
-                                            return_type: None,
+                                            ..Default::default()
                                         }),
                                     })
                                     .as_iife(),
                                 ))),
                                 definite: false,
                             }],
+                            ..Default::default()
                         }))));
 
                         for spec in import.specifiers.into_iter() {
@@ -174,80 +181,91 @@ impl VisitMut for OptionalImport {
                                     span,
                                 }) => {
                                     let mark = enable_helper!(interop_require_wildcard);
-                                    let span = span.apply_mark(mark);
+                                    let ctxt = SyntaxContext::empty().apply_mark(mark);
 
-                                    let call_expr =
-                                        Expr::from(quote_ident!(span, "_interop_require_wildcard"))
-                                            .as_call(
-                                                span,
-                                                vec![req.clone().as_arg(), true.as_arg()],
-                                            );
+                                    let call_expr = Expr::from(quote_ident!(
+                                        ctxt,
+                                        span,
+                                        "_interop_require_wildcard"
+                                    ))
+                                    .as_call(span, vec![req.clone().as_arg(), true.as_arg()]);
 
                                     let ternary = Expr::Cond(CondExpr {
                                         span,
-                                        test: Box::new(Expr::Bin(BinExpr {
+                                        test: BinExpr {
                                             span,
                                             op: BinaryOp::EqEqEq,
-                                            left: undefined(DUMMY_SP),
+                                            left: Expr::undefined(DUMMY_SP),
                                             right: Box::new(Expr::Ident(req.clone())),
-                                        })),
-                                        cons: Box::new(call_expr),
-                                        alt: undefined(DUMMY_SP),
+                                        }
+                                        .into(),
+                                        cons: call_expr.into(),
+                                        alt: Expr::undefined(DUMMY_SP),
                                     });
 
-                                    stmts.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
-                                        span: DUMMY_SP,
-                                        kind: VarDeclKind::Const,
-                                        declare: false,
-                                        decls: vec![VarDeclarator {
+                                    stmts.push(
+                                        VarDecl {
                                             span: DUMMY_SP,
-                                            name: Pat::Ident(local.into()),
-                                            init: Some(Box::new(ternary)),
-                                            definite: false,
-                                        }],
-                                    }))));
+                                            kind: VarDeclKind::Const,
+                                            declare: false,
+                                            decls: vec![VarDeclarator {
+                                                span: DUMMY_SP,
+                                                name: Pat::Ident(local.into()),
+                                                init: Some(Box::new(ternary)),
+                                                definite: false,
+                                            }],
+                                            ..Default::default()
+                                        }
+                                        .into(),
+                                    );
                                 }
                                 ImportSpecifier::Default(ImportDefaultSpecifier {
                                     local,
                                     span,
                                 }) => {
                                     let mark = enable_helper!(interop_require_default);
-                                    let span = span.apply_mark(mark);
+                                    let ctxt = SyntaxContext::empty().apply_mark(mark);
 
-                                    let call_expr =
-                                        Expr::from(quote_ident!(span, "_interop_require_default"))
-                                            .as_call(
-                                                span,
-                                                vec![req.clone().as_arg(), true.as_arg()],
-                                            );
+                                    let call_expr = Expr::from(quote_ident!(
+                                        ctxt,
+                                        span,
+                                        "_interop_require_default"
+                                    ))
+                                    .as_call(span, vec![req.clone().as_arg(), true.as_arg()]);
 
                                     let ternary = Expr::Cond(CondExpr {
                                         span,
-                                        test: Box::new(Expr::Bin(BinExpr {
+                                        test: BinExpr {
                                             span,
                                             op: BinaryOp::NotEqEq,
-                                            left: undefined(DUMMY_SP),
+                                            left: Expr::undefined(DUMMY_SP),
                                             right: Box::new(Expr::Ident(req.clone())),
-                                        })),
-                                        cons: Box::new(Expr::Member(MemberExpr {
+                                        }
+                                        .into(),
+                                        cons: MemberExpr {
                                             span,
                                             obj: Box::new(call_expr),
-                                            prop: MemberProp::Ident(ident("default")),
-                                        })),
-                                        alt: undefined(DUMMY_SP),
+                                            prop: MemberProp::Ident(ident_name("default")),
+                                        }
+                                        .into(),
+                                        alt: Expr::undefined(DUMMY_SP),
                                     });
 
-                                    stmts.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
-                                        span: DUMMY_SP,
-                                        kind: VarDeclKind::Const,
-                                        declare: false,
-                                        decls: vec![VarDeclarator {
+                                    stmts.push(
+                                        VarDecl {
                                             span: DUMMY_SP,
-                                            name: Pat::Ident(local.into()),
-                                            init: Some(Box::new(ternary)),
-                                            definite: false,
-                                        }],
-                                    }))));
+                                            kind: VarDeclKind::Const,
+                                            declare: false,
+                                            decls: vec![VarDeclarator {
+                                                span: DUMMY_SP,
+                                                name: Pat::Ident(local.into()),
+                                                init: Some(ternary.into()),
+                                                definite: false,
+                                            }],
+                                            ..Default::default()
+                                        }
+                                        .into(),
+                                    );
                                 }
                                 ImportSpecifier::Named(ImportNamedSpecifier {
                                     local,
@@ -256,8 +274,10 @@ impl VisitMut for OptionalImport {
                                     ..
                                 }) => {
                                     let prop = match imported {
-                                        None => MemberProp::Ident(local.clone()),
-                                        Some(ModuleExportName::Ident(i)) => MemberProp::Ident(i),
+                                        None => MemberProp::Ident(local.clone().into()),
+                                        Some(ModuleExportName::Ident(i)) => {
+                                            MemberProp::Ident(i.into())
+                                        }
                                         Some(ModuleExportName::Str(s)) => {
                                             MemberProp::Computed(ComputedPropName {
                                                 span,
@@ -276,17 +296,21 @@ impl VisitMut for OptionalImport {
                                         })),
                                     });
 
-                                    stmts.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
-                                        span: DUMMY_SP,
-                                        kind: VarDeclKind::Const,
-                                        declare: false,
-                                        decls: vec![VarDeclarator {
+                                    stmts.push(
+                                        VarDecl {
                                             span: DUMMY_SP,
-                                            name: Pat::Ident(local.into()),
-                                            init: Some(Box::new(access)),
-                                            definite: false,
-                                        }],
-                                    }))));
+                                            kind: VarDeclKind::Const,
+                                            declare: false,
+                                            decls: vec![VarDeclarator {
+                                                span: DUMMY_SP,
+                                                name: Pat::Ident(local.into()),
+                                                init: Some(Box::new(access)),
+                                                definite: false,
+                                            }],
+                                            ..Default::default()
+                                        }
+                                        .into(),
+                                    );
                                 }
                             }
                         }

@@ -1,11 +1,9 @@
 use crate::parser::util::*;
-use lazy_static::lazy_static;
 use swc_common::util::take::Take;
-use swc_common::{Mark, DUMMY_SP};
+use swc_common::{Mark, SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::*;
+use swc_ecma_utils::quote_ident;
 use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
-
-lazy_static! {}
 
 pub fn wrap_in_function(top_level_mark: Mark) -> impl VisitMut + Fold {
     as_folder(WrapInFunction {
@@ -30,7 +28,7 @@ impl VisitMut for WrapInFunction {
             "must be called after commonjs transformation"
         );
 
-        let span = DUMMY_SP.apply_mark(self.unresolved_mark);
+        let ctx = SyntaxContext::empty().apply_mark(self.unresolved_mark);
 
         let wrapped = Stmt::Expr(ExprStmt {
             span: DUMMY_SP,
@@ -41,29 +39,29 @@ impl VisitMut for WrapInFunction {
                     function: Box::new(Function {
                         params: vec![
                             Param {
-                                span,
+                                span: DUMMY_SP,
                                 decorators: vec![],
-                                pat: Pat::Ident(ident("exports").into()),
+                                pat: quote_ident!(ctx, "exports").into(),
                             },
                             Param {
-                                span,
+                                span: DUMMY_SP,
                                 decorators: vec![],
-                                pat: Pat::Ident(ident("require").into()),
+                                pat: quote_ident!(ctx, "require").into(),
                             },
                             Param {
-                                span,
+                                span: DUMMY_SP,
                                 decorators: vec![],
-                                pat: Pat::Ident(ident("module").into()),
+                                pat: quote_ident!(ctx, "module").into(),
                             },
                             Param {
-                                span,
+                                span: DUMMY_SP,
                                 decorators: vec![],
-                                pat: Pat::Ident(ident("__filename").into()),
+                                pat: quote_ident!(ctx, "__filename").into(),
                             },
                             Param {
-                                span,
+                                span: DUMMY_SP,
                                 decorators: vec![],
-                                pat: Pat::Ident(ident("__dirname").into()),
+                                pat: quote_ident!(ctx, "__dirname").into(),
                             },
                         ],
                         decorators: vec![],
@@ -71,11 +69,9 @@ impl VisitMut for WrapInFunction {
                         body: Some(BlockStmt {
                             span: DUMMY_SP,
                             stmts: stmts.into_iter().map(|m| m.expect_stmt()).collect(),
+                            ..Default::default()
                         }),
-                        is_generator: false,
-                        is_async: false,
-                        type_params: None,
-                        return_type: None,
+                        ..Default::default()
                     }),
                 })),
             })),
@@ -127,11 +123,9 @@ impl VisitMut for WrapInFunction {
                         body: Some(BlockStmt {
                             span: DUMMY_SP,
                             stmts: body,
+                            ..Default::default()
                         }),
-                        is_generator: false,
-                        is_async: false,
-                        type_params: None,
-                        return_type: None,
+                        ..Default::default()
                     }),
                 })),
             })),

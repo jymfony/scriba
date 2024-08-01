@@ -1,5 +1,5 @@
 use swc_atoms::JsWord;
-use swc_common::{collections::AHashSet, util::take::Take, Mark, DUMMY_SP};
+use swc_common::{collections::AHashSet, util::take::Take, Mark, SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::*;
 use swc_ecma_utils::ExprFactory;
 use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
@@ -35,23 +35,20 @@ impl ClassStaticBlock {
                     expr: Box::new(Expr::Arrow(ArrowExpr {
                         span: DUMMY_SP,
                         params: Vec::new(),
-                        is_async: false,
-                        is_generator: false,
-                        type_params: None,
-                        return_type: None,
                         body: Box::new(BlockStmtOrExpr::BlockStmt(static_block.body)),
+                        ..Default::default()
                     })),
                 }
                 .as_callee(),
                 args: Vec::new(),
-                type_args: None,
+                ..Default::default()
             });
 
             Some(Box::new(expr))
         };
 
         PrivateProp {
-            span: span.apply_mark(self.mark),
+            span,
             is_static: true,
             is_optional: false,
             is_override: false,
@@ -61,14 +58,11 @@ impl ClassStaticBlock {
             accessibility: None,
             key: PrivateName {
                 span: DUMMY_SP,
-                id: Ident {
-                    span: DUMMY_SP,
-                    sym: private_id,
-                    optional: false,
-                },
+                name: private_id,
             },
             value,
             definite: false,
+            ctxt: SyntaxContext::empty().apply_mark(self.mark),
         }
     }
 }
@@ -82,7 +76,7 @@ impl VisitMut for ClassStaticBlock {
         let mut private_names = AHashSet::default();
         for member in &class.body {
             if let ClassMember::PrivateProp(private_property) = member {
-                private_names.insert(private_property.key.id.sym.clone());
+                private_names.insert(private_property.key.name.clone());
             }
         }
 

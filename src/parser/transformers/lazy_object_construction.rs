@@ -25,6 +25,7 @@ impl VisitMut for LazyObjectConstruction {
             callee,
             args,
             type_args,
+            ctxt,
         } = new_expr.take();
 
         let new_args = vec![vec![callee.as_arg()], args.unwrap_or_default()]
@@ -37,6 +38,7 @@ impl VisitMut for LazyObjectConstruction {
             callee: Callee::Expr(Box::new(Expr::Ident(ident("_construct_jobject")))),
             args: new_args,
             type_args,
+            ctxt,
         });
     }
 }

@@ -1,22 +1,20 @@
 use crate::parser::util::*;
-use lazy_static::lazy_static;
+use std::sync::LazyLock;
 use swc_common::util::take::Take;
 use swc_common::DUMMY_SP;
 use swc_ecma_ast::*;
 use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
 
-lazy_static! {
-    static ref JOBJECT_ACCESSOR: MemberExpr = {
-        let obj_expr = ident("__jymfony");
-        let prop = ident("JObject");
+const JOBJECT_ACCESSOR: LazyLock<MemberExpr> = LazyLock::new(|| {
+    let obj_expr = ident("__jymfony");
+    let prop = ident_name("JObject");
 
-        MemberExpr {
-            span: DUMMY_SP,
-            obj: Box::new(Expr::Ident(obj_expr)),
-            prop: MemberProp::Ident(prop),
-        }
-    };
-}
+    MemberExpr {
+        span: DUMMY_SP,
+        obj: Box::new(Expr::Ident(obj_expr)),
+        prop: MemberProp::Ident(prop),
+    }
+});
 
 pub fn class_jobject() -> impl VisitMut + Fold {
     as_folder(ClassJObject::default())
@@ -42,7 +40,7 @@ impl VisitMut for ClassJObject {
                         span: DUMMY_SP,
                         callee: Callee::Super(Super::dummy()),
                         args: vec![],
-                        type_args: None,
+                        ..Default::default()
                     };
 
                     let call_super = Stmt::Expr(ExprStmt {

@@ -11,7 +11,7 @@ use swc_common::{BytePos, FileName};
 use swc_ecma_ast::{EsVersion, Expr, Pat};
 use swc_ecma_parser::lexer::Lexer;
 use swc_ecma_parser::token::{IdentLike, Token, Word};
-use swc_ecma_parser::{EsConfig, Parser, Syntax, TsConfig};
+use swc_ecma_parser::{EsSyntax, Parser, Syntax, TsSyntax};
 
 mod program;
 mod sourcemap;
@@ -19,7 +19,7 @@ mod transformers;
 mod util;
 
 const ES_VERSION: EsVersion = EsVersion::EsNext;
-const ES_CONFIG: EsConfig = EsConfig {
+const ES_CONFIG: EsSyntax = EsSyntax {
     jsx: false,
     fn_bind: false,
     decorators: true,
@@ -48,14 +48,15 @@ impl CodeParser for &str {
         let source_file = source_map.new_source_file(
             filename
                 .map(|f| FileName::Real(PathBuf::from(f)))
-                .unwrap_or_else(|| FileName::Anon),
+                .unwrap_or_else(|| FileName::Anon)
+                .into(),
             self.to_string(),
         );
 
         let comments = SingleThreadedComments::default();
         let is_typescript = filename.is_some_and(|f| f.ends_with(".ts"));
         let syntax = if is_typescript {
-            Syntax::Typescript(TsConfig {
+            Syntax::Typescript(TsSyntax {
                 tsx: false,
                 decorators: true,
                 dts: false,
@@ -162,7 +163,7 @@ mod tests {
     use crate::testing::uuid::reset_test_uuid;
     use std::path::PathBuf;
     use swc_common::{chain, Mark};
-    use swc_ecma_parser::{EsConfig, Syntax};
+    use swc_ecma_parser::{EsSyntax, Syntax};
     use swc_ecma_transforms_base::resolver;
     use swc_ecma_transforms_compat::es2022::static_blocks;
     use swc_ecma_visit::Fold;
@@ -177,7 +178,7 @@ mod tests {
 
         exec_tr(
             "decorator",
-            Syntax::Es(EsConfig {
+            Syntax::Es(EsSyntax {
                 jsx: false,
                 fn_bind: false,
                 decorators: true,

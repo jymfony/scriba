@@ -337,6 +337,7 @@ return x[Symbol.metadata].act[Symbol.parameters][0].type;
                 span: DUMMY_SP,
                 sym: "x".into(),
                 optional: false,
+                ..Default::default()
             },
             filename: None,
             namespace: None,

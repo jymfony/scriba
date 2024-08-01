@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::Command;
 use std::{env, fs};
 use swc_common::Mark;
-use swc_ecma_parser::{EsConfig, Syntax};
+use swc_ecma_parser::{EsSyntax, Syntax};
 use swc_ecma_transforms_base::{fixer, hygiene};
 use swc_ecma_transforms_testing::{HygieneVisualizer, Tester};
 use swc_ecma_visit::{Fold, FoldWith};
@@ -43,7 +43,7 @@ where
         let module = tester.apply_transform(
             tr,
             "input.js",
-            Syntax::Es(EsConfig {
+            Syntax::Es(EsSyntax {
                 jsx: false,
                 fn_bind: false,
                 decorators: true,

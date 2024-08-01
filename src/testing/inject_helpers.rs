@@ -1,5 +1,5 @@
 use std::path::Path;
-use swc_common::{Mark, DUMMY_SP};
+use swc_common::{Mark, SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::*;
 use swc_ecma_utils::{prepend_stmts, quote_ident, ExprFactory};
 use swc_ecma_visit::{as_folder, noop_visit_mut_type, Fold, VisitMut, VisitMutWith};
@@ -24,7 +24,11 @@ impl InjectHelpers {
     fn build_import(&self, name: &str, mark: Mark) -> ModuleItem {
         let s = ImportSpecifier::Named(ImportNamedSpecifier {
             span: DUMMY_SP,
-            local: Ident::new(format!("_{}", name).into(), DUMMY_SP.apply_mark(mark)),
+            local: Ident::new(
+                format!("_{}", name).into(),
+                DUMMY_SP,
+                SyntaxContext::empty().apply_mark(mark),
+            ),
             imported: Some(quote_ident!("_").into()),
             is_type_only: false,
         });
@@ -35,8 +39,9 @@ impl InjectHelpers {
             span: DUMMY_SP,
             specifiers: vec![s],
             src: Box::new(src),
-            with: Default::default(),
             type_only: Default::default(),
+            with: None,
+            phase: Default::default(),
         }))
     }
 
@@ -44,9 +49,10 @@ impl InjectHelpers {
         let c = CallExpr {
             span: DUMMY_SP,
             callee: Expr::Ident(Ident {
-                span: DUMMY_SP.apply_mark(self.global_mark),
+                span: DUMMY_SP,
                 sym: "require".into(),
                 optional: false,
+                ctxt: SyntaxContext::empty().apply_mark(self.global_mark),
             })
             .as_callee(),
             args: vec![Str {
@@ -55,7 +61,7 @@ impl InjectHelpers {
                 raw: None,
             }
             .as_arg()],
-            type_args: None,
+            ..Default::default()
         };
         let decl = Decl::Var(
             VarDecl {
@@ -65,11 +71,17 @@ impl InjectHelpers {
                 decls: vec![VarDeclarator {
                     span: DUMMY_SP,
                     name: Pat::Ident(
-                        Ident::new(format!("_{}", name).into(), DUMMY_SP.apply_mark(mark)).into(),
+                        Ident::new(
+                            format!("_{}", name).into(),
+                            DUMMY_SP,
+                            SyntaxContext::empty().apply_mark(mark),
+                        )
+                        .into(),
                     ),
                     init: Some(c.into()),
                     definite: false,
                 }],
+                ..Default::default()
             }
             .into(),
         );
